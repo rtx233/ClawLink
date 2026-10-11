@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const { version } = require('../package.json');
+const { serverFiles } = require('./package-files.cjs');
 function run(command, args, options = {}) { return execFileSync(command, args, { cwd: root, stdio: 'inherit', ...options }); }
 function copy(source, destination) { fs.cpSync(source, destination, { recursive: true }); }
 async function main() {
@@ -19,7 +20,7 @@ async function main() {
     fs.mkdirSync(path.join(contents, 'MacOS'), { recursive: true }); fs.mkdirSync(path.join(resources, 'runtime'), { recursive: true });
     fs.mkdirSync(path.join(code, 'native'), { recursive: true });
     for (const file of ['package.json', 'package-lock.json']) copy(path.join(root, file), path.join(code, file));
-    fs.mkdirSync(path.join(code, 'server')); for (const file of ['index.js', 'adapters.js', 'native.js', 'runtime.js', 'cli.js', 'pi.js', 'paseo.js', 'paseo-core.cjs', 'paseo-worker.mjs', 'messaging.js', 'ai-client.js', 'commands.js', 'permissions.js']) copy(path.join(root, 'server', file), path.join(code, 'server', file));
+    fs.mkdirSync(path.join(code, 'server')); for (const file of serverFiles) copy(path.join(root, 'server', file), path.join(code, 'server', file));
     copy(path.join(root, 'dist'), path.join(code, 'public'));
     run('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: code });
     run('swiftc', ['-O', '-target', 'arm64-apple-macos13.0', 'native/ClawLinkBridge.swift', '-o', path.join(code, 'native/ClawLinkBridge'), '-framework', 'Cocoa', '-framework', 'ApplicationServices']);

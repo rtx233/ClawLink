@@ -61,7 +61,7 @@ test('PI 精确续聊现有文件，新建路径稳定，提示文字走 stdin�
   const fresh = await pi.bind({ mode: 'new', workdir: dir }, dir);
   assert.notEqual(fresh.sessionFile, file); assert.equal(headerOf(fresh.sessionFile).id, fresh.sessionId);
   await pi.send(fresh, 'new'); await pi.send(fresh, 'continue'); assert.equal(calls.at(-1).args.at(-1), fresh.sessionFile);
-  assert.equal(fs.statSync(fresh.sessionFile).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(fresh.sessionFile).mode & 0o777, 0o600);
   fs.writeFileSync(file, JSON.stringify({ ...header, id: '99999999-2222-4333-8444-555555555555' }) + '\n');
   await assert.rejects(pi.send(binding, 'no'), /标识/);
   fs.unlinkSync(file); await assert.rejects(pi.validate(binding), /ENOENT/);

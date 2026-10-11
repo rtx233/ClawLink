@@ -1,8 +1,22 @@
 # ClawLink 会话路由中心
 
-在 macOS 上把多个 OpenClaw 微信账号、Telegram Bot 的文字消息转发到 Codex、ChatGPT、Claude 的原生聊天、PI Coding Agent 的会话文件、Paseo 的已有会话，读取回复后发回原聊天。包含中文前端和本地 Node.js 后端，沿用目标软件 / PI 的登录与模型配置，ClawLink 不收集模型 API Key。
+在 macOS / Windows 上把多个 OpenClaw 微信账号、Telegram Bot 的文字消息转发到原生应用聊天、PI Coding Agent 的会话文件、Paseo 的已有会话，读取回复后发回原聊天。包含中文前端和本地 Node.js 后端，沿用目标软件 / PI 的登录与模型配置，ClawLink 不收集模型 API Key。原生聊天能否绑定取决于目标应用是否暴露可用的系统无障碍接口。
 
 ## 安装包
+
+### Windows 10/11 x64
+
+Windows 与 macOS 共用微信 / Telegram 登录、路由切换、指令编辑、账户权限和 AI 主动发消息代码。Windows 使用 Electron 独立窗口及系统托盘、UI Automation 会话连接器；自带 Node 和 .NET Framework 连接器，无需另装 Node。当前为未签名的测试版本。
+
+GitHub 仓库的 **Actions → Windows build and validation** 在 `main` 更新时自动构建并验证；成功后从该次运行的 **Artifacts → ClawLink-Windows-x64** 下载。`ClawLink-1.0.0-Windows-x64-setup.exe` 为当前用户安装，ZIP 为解压运行版；普通更新安装包会保留 `%APPDATA%\ClawLink` 中的账号和配置。不要把自己的数据目录放进解压目录或上传到仓库。Mac 和 Windows 各自保存配置，不能同时接收同一个微信账号 / TG Token。
+
+安装后在「设置」开启「登录 Windows 后自动启动」。关闭窗口后继续在托盘接收消息，通过托盘「退出并停止机器人」结束服务。解压版开启自启后应保持 exe 路径不变。启动权限只用于当前用户，不需要管理员权限。截图截取主屏幕，只需开启账户截图权限；没有 macOS 的屏幕录制授权步骤，锁屏 / 无交互桌面时拒绝截图。
+
+**Windows 原生会话绑定**：先运行目标 Windows 应用，添加路由会话时从实际发现的应用中选择。连接器按完整 exe 路径、唯一窗口标题及聊天正文标识确认目标；操作普通用户权限的窗口，不支持绕过管理员权限、锁屏或安全桌面。目标需提供 UI Automation 文本和按钮接口，未暴露输入框 / 回复区域 / Invoke 按钮的版本会明确拒绝绑定或发送。Electron 应用可尝试用其 `--force-renderer-accessibility` 启动选项暴露元素，然后重新检查。不会假定所有版本的 ChatGPT / Codex / Claude Windows 客户端均兼容；真实目标仍需手工测试发送和回传。
+
+PI 支持 Windows npm 安装入口，或者用 `PI_CLI_PATH` 指定 `cli.js` 完整路径；npm `.cmd` 解析为 Node 脚本执行，消息和路径不经过 cmd.exe 拼接。Paseo 自动检查当前用户安装目录和 Program Files，也可设置 `PASEO_APP_PATH` 为安装目录或 `Paseo.exe`；仍要求该安装版本提供兼容 SDK。
+
+### macOS Apple Silicon
 
 `release/ClawLink-1.0.0-macOS-arm64.zip` 是 macOS 13.5+、Apple Silicon 的本地测试安装包。解压后将 `.app` 拖到「应用程序」并打开。安装包自带 Node、连接器和界面，无需安装开发工具；控制台直接显示在 ClawLink 的独立 App 窗口中，Dock 和菜单栏均有入口。关闭窗口后继续接收机器人消息；菜单栏或 Cmd+Q 退出时停止服务。
 
@@ -14,7 +28,7 @@
 
 ## 从源码启动
 
-需要 macOS、Node.js 22+、Xcode Command Line Tools（`xcode-select --install`，用于编译 Swift）。
+需要 Node.js 22+。macOS 还需 Xcode Command Line Tools（`xcode-select --install`，用于编译 Swift）；Windows 10/11 x64 使用系统 .NET Framework 4.8 编译器。
 
 ```bash
 npm ci
@@ -22,7 +36,7 @@ npm run native:build
 npm start
 ```
 
-开发调试打开 <http://localhost:4173>。双击 `scripts/start.command` 会打开构建好的独立 App；尚未构建时自动构建。修改源码后请重新执行 `npm run release` 再打开 App。服务仅监听 `127.0.0.1`，不能直接部署到远程服务器操作本机软件。
+开发调试打开 <http://localhost:4173>。macOS 双击 `scripts/start.command` 会打开构建好的独立 App；尚未构建时自动构建。修改源码后请重新执行 `npm run release`（Mac）或 `npm run release:windows`（Windows）再打开 App。服务仅监听 `127.0.0.1`，不能直接部署到远程服务器操作本机软件。
 
 ## 使用顺序
 
@@ -106,7 +120,7 @@ AI 工具只访问本机服务，凭据由 `ai-client.js` 从私有 `ai-endpoint
 
 Git 仓库只包含源码、依赖清单、构建脚本、测试和文档。`.gitignore` 排除运行数据、登录凭据、路由与聊天绑定、PI 会话文件、备份、日志、本地环境文件、编辑器及代理设置、签名密钥和生成的安装包。克隆仓库后需自行登录并配置，不会带入开发者的本地账号或会话。
 
-- 数据目录：源码版为 `server/data`，安装包为 `~/Library/Application Support/ClawLink`。
+- 数据目录：源码版为 `server/data`；Mac 安装包为 `~/Library/Application Support/ClawLink`，Windows 安装包为 `%APPDATA%\ClawLink`。Windows 使用当前用户和 SYSTEM 的目录 ACL，子文件继承；Windows 不以 POSIX `600` 作为权限验证依据。
 - `state.json`：会话绑定、机器人元数据、路由、账户权限、指令名称和帮助说明、指标、最近 200 条活动。日志保存事件信息，不记录完整消息正文。
 - `secrets.json`：平台 Token、消息游标、去重记录、配对码、允许的聊天 ID、每个微信聊天的上下文、AI 工具本机令牌和发送去重记录。文件权限为 `600`、目录为 `700`；本地明文保存，未采用钥匙串加密。所有运行数据已加入 `.gitignore`，HTTP 不提供这些文件，状态接口不返回平台 Token、微信上下文或 AI 工具令牌。
 - `ai-endpoint.json`：启动时生成的本机端点和 AI 工具令牌，权限 `600`，退出时移除。MCP / CLI 每次调用重新读取，服务重启换端口后无需重启工具进程。收件人名称、开关和会话回复指令开关保存在 `state.json`。
@@ -140,6 +154,10 @@ npm run test:release
 
 ## 构建与公开发行
 
+Windows x64 主机执行 `npm run release:windows`，生成 NSIS 安装包、ZIP、SHA-256 文件和 `manifest-windows.json`。随后运行 `npm run test:windows` 验证真实 UI Automation 测试窗口、打包后的 Electron 窗口、内置运行时、数据隔离及退出停止。测试不修改登录项、不登录个人账号；CI 中的截图只读取一次性 runner 桌面。普通 macOS 主机不能作为 Windows 原生运行验证环境。
+
+Windows CI 使用干净 checkout 构建，两个平台使用相同服务文件白名单；不会从开发者机器读取配置、Token、路由、历史或备份。只有构建和 Windows 运行测试成功才上传安装产物。推送 `v*` 标签时附加到对应 GitHub Release；不存在该 Release 则创建草稿，不自动公开发行。当前未配置 Authenticode 签名，发布前仍需验证用户的真实目标应用、开机自启、最低 Windows 版本和代码签名。
+
 在 Apple Silicon macOS 上执行 `npm run release`，生成 `.app`、ZIP、SHA-256 文件和 `manifest.json`。构建只收集指定服务文件、生产依赖及前端产物，不包含运行数据、Token、测试应用或开发依赖。Node 及依赖许可证随包附带。
 
 如具备 Developer ID，构建时设置 `CLAWLINK_SIGN_IDENTITY` 为证书名称。随后使用自己的 Apple 公证配置提交 ZIP：
@@ -161,6 +179,9 @@ spctl --assess --type execute --verbose release/ClawLink-1.0.0-arm64.app
 - `server/native.js`：原生操作排队、等待生成、提取新增回复。
 - `native/ClawLinkBridge.swift`：macOS Accessibility 窗口发现、检查、标识验证、发送读取及屏幕截图。
 - `native/ClawLinkApp.swift`：独立 App 窗口、WebKit 原生设置桥接、登录项、菜单栏、本地服务生命周期。
+- `native/windows/ClawLinkBridge.cs`：Windows UI Automation 会话发现、校验、发送、回复读取及内存截图。
+- `windows/main.cjs` / `preload.cjs`：Windows 窗口、托盘、自启、受限设置桥接、本地服务生命周期。
+- `scripts/release-windows.js` / `.github/workflows/windows.yml`：Windows 安装包构建及实际 Windows 环境验证。
 - `server/index.js`：持久化、授权聊天、路由、接收循环、前端 API。
 - `server/messaging.js`：收件人、微信上下文隔离、AI 发送权限、发送去重及本轮回复指令。
 - `server/ai-client.js`：AI 消息工具的 MCP stdio / CLI 入口。

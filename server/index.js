@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const QRCode = require('qrcode');
 const { setTimeout: delay } = require('node:timers/promises');
 const { createAdapters } = require('./adapters');
-const { createNative } = require('./native');
+const { createNative, binary: nativeBinary } = require('./native');
 const { createPi } = require('./pi');
 const { createPaseo } = require('./paseo');
 const { acquireLock } = require('./runtime');
@@ -16,7 +16,8 @@ const { version } = require('../package.json');
 
 const rootDir = path.resolve(__dirname, '..');
 // Known targets keep old configurations readable while allowing any running
-// macOS app with an Accessibility tree to be selected from the UI.
+// desktop app with an accessibility tree to be selected from the UI.
+// Windows keeps the historical bundleId field as an opaque executable identity.
 const PROVIDERS = {
   ChatGPT: 'com.openai.chat',
   Codex: 'com.openai.codex',
@@ -92,7 +93,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       peers: secrets[bot.id]?.allowedPeers || [], route: sessionById(bot.target)?.name || '未指定' })),
       sessions: state.sessions.map(session => ({ ...session, users: state.bots.filter(bot => bot.target === session.id).length })),
       recipients: messaging.list(),
-      service: { online: true, platform: process.platform, nativeBuilt: fs.existsSync(path.join(rootDir, 'native/ClawLinkBridge')), polling: polling.size } };
+      service: { online: true, platform: process.platform, nativeBuilt: fs.existsSync(nativeBinary), polling: polling.size } };
   }
   function stopBot(botId) {
     const worker = polling.get(botId); if (worker) worker.abort(); polling.delete(botId);
@@ -408,14 +409,14 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       if (state.sessions.some(x => x.name === name)) throw new HttpError('会话名称已存在');
       const provider = targetType === 'pi' ? 'PI' : targetType === 'paseo' ? 'Paseo' : clean(body.provider) || providerNames.get(bundleId) || bundleId;
       const session = { id: makeId('session'), name, provider, targetType, bundleId,
-        description: clean(body.description) || (targetType === 'native' ? 'macOS 原生会话' : `${provider} 会话`),
+        description: clean(body.description) || (targetType === 'native' ? `${process.platform === 'win32' ? 'Windows' : 'macOS'} 原生会话` : `${provider} 会话`),
         tone: targetType === 'pi' ? 'target-pi' : targetType === 'paseo' ? 'target-paseo' : targetTone(bundleId),
         logo: targetType === 'pi' || targetType === 'paseo' ? 'P' : targetLogo(bundleId), status: 'unbound' };
       state.sessions.push(session); activity(`创建会话 ${name}`); save(); return json(res, 201, { session });
     }
     if (method === 'POST' && pathname === '/api/native/inspect') {
-      if (!validBundleId(body.bundleId)) throw new HttpError('应用 Bundle ID 无效');
-      return json(res, 200, await native.inspect({ bundleId: clean(body.bundleId, 200), windowTitle: String(body.windowTitle ?? '') }));
+      if (!validBundleId(body.bundleId)) throw new HttpError('应用标识无效');
+      return json(res, 200, await native.inspect({ bundleId: clean(body.bundleId, 200), executablePath: String(body.executablePath || '').slice(0, 2000), windowTitle: String(body.windowTitle ?? '') }));
     }
     if (method === 'POST' && pathname === '/api/targets/bind') {
       const session = requireSession(body.sessionId);
@@ -433,6 +434,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       if (!validBundleId(source.bundleId) || source.bundleId !== expectedBundle) throw new HttpError('绑定应用与会话提供方不一致');
       const binding = {};
       for (const key of ['bundleId', 'windowTitle', 'markerPath', 'markerText', 'inputPath', 'replyPath', 'sendPath', 'navigationPath', 'navigationText', 'busyPath', 'busyText']) binding[key] = String(source[key] ?? '').slice(0, key.endsWith('Text') ? 8000 : 500);
+      if (process.platform === 'win32') binding.executablePath = String(source.executablePath || '').slice(0, 2000);
       for (const key of ['markerPath', 'inputPath', 'replyPath']) if (!/^(root|\d+(\.\d+)*)$/.test(binding[key])) throw new HttpError(`请正确选择 ${key}`);
       for (const key of ['sendPath', 'navigationPath', 'busyPath']) if (binding[key] && !/^(root|\d+(\.\d+)*)$/.test(binding[key])) throw new HttpError(`元素路径 ${key} 无效`);
       if (!binding.markerText.trim() || /^(chatgpt|claude|openai|anthropic)$/i.test(binding.markerText.trim())) throw new HttpError('请绑定当前聊天的唯一标识，不能使用应用名称');
@@ -540,5 +542,7 @@ if (require.main === module) {
   app.server.once('error', error => { console.error(`无法启动本地服务：${error.code || error.message}`); app.close().finally(() => process.exit(1)); });
   app.server.listen(port, '127.0.0.1', () => console.log(`ClawLink: http://localhost:${app.server.address().port}`));
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, stop);
+  // Desktop launchers use a private IPC channel for graceful Windows shutdown.
+  if (process.send) { process.on('message', message => { if (message?.action === 'stop') stop(); }); process.on('disconnect', stop); }
 }
 module.exports = { createApp };

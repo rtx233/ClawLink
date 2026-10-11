@@ -35,7 +35,7 @@ test('真实协议扫码、验证码、凭据隔离及私有数据权限', async
   assert.equal(recipient.ready, false);
   assert.equal((await f.request(`/api/bots/${bot.id}/pairing`, {})).status, 400);
   assert.ok(!JSON.stringify(state.data).includes('wx-private-test-token'));
-  assert.equal((fs.statSync(path.join(f.dataDir, 'secrets.json')).mode & 0o777), 0o600);
+  if (process.platform !== 'win32') assert.equal((fs.statSync(path.join(f.dataDir, 'secrets.json')).mode & 0o777), 0o600);
   assert.equal((await f.request('/server/data/secrets.json')).status, 404);
   assert.equal((await f.request('/native/ClawLinkBridge.swift')).status, 404);
   assert.equal((await f.request('/api/commands', { botId: bot.id, text: '/route' }, 'POST', { Origin: 'https://evil.test' })).status, 403);

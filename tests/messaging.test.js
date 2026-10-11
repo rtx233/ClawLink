@@ -64,7 +64,7 @@ test('AI 选择不同 TG 机器人 / 微信收件人，凭据和上下文不暴�
   assert.equal(f.sent.at(-1).peer, 'wx-two'); assert.equal(f.sent.at(-1).contextToken, 'wx-context-two');
   const exposed = JSON.stringify([(await f.request('/api/state')).data, selected, (await f.request('/api/ai/config')).data]);
   for (const privateValue of [TOKEN, 'wx-context-one', 'wx-context-two', 'wx-private-test-token', JSON.parse(fs.readFileSync(path.join(f.dataDir, 'ai-endpoint.json'))).token]) assert.ok(!exposed.includes(privateValue));
-  assert.equal(fs.statSync(path.join(f.dataDir, 'ai-endpoint.json')).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(f.dataDir, 'ai-endpoint.json')).mode & 0o777, 0o600);
   assert.equal((await f.request('/server/data/ai-endpoint.json')).status, 404);
   assert.equal((await f.request('/api/ai/send', sendRequest(first.id), 'POST', { Authorization: 'Bearer wrong' })).status, 401);
   assert.ok(!JSON.stringify((await f.request('/api/state')).data.activity).includes('发给 '));

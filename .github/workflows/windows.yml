@@ -1,0 +1,52 @@
+name: Windows build and validation
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run release:windows
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - run: npm run test:windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClawLink-Windows-x64
+          if-no-files-found: error
+          path: |
+            release/ClawLink-*-Windows-x64.zip
+            release/ClawLink-*-Windows-x64-setup.exe
+            release/ClawLink-*-Windows-x64*.sha256
+            release/manifest-windows.json
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClawLink-Windows-x64
+          path: artifacts
+      - name: Attach verified Windows packages to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$RELEASE_TAG" || gh release create "$RELEASE_TAG" --draft --title "ClawLink $RELEASE_TAG" --notes "Windows x64 安装包和 ZIP，未签名。原生目标需提供 UI Automation 接口。"
+          gh release upload "$RELEASE_TAG" artifacts/* --clobber

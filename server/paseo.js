@@ -3,14 +3,23 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { createQueue, createCliRunner } = require('./cli');
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-function desktopRuntime() {
-  const app = process.env.PASEO_APP_PATH || '/Applications/Paseo.app';
-  const resources = path.join(app, 'Contents/Resources');
-  const command = path.join(app, 'Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper');
+function desktopRuntime({ platform = process.platform, env = process.env } = {}) {
+  const candidates = [env.PASEO_APP_PATH, ...(platform === 'win32' ? [
+    env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Programs/Paseo'),
+    env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Paseo'),
+    env.ProgramFiles && path.join(env.ProgramFiles, 'Paseo')
+  ] : ['/Applications/Paseo.app'])].filter(Boolean);
+  function locate(app) {
+  if (platform === 'win32' && /\.exe$/i.test(app)) app = path.dirname(app);
+  const resources = path.join(app, platform === 'win32' ? 'resources' : 'Contents/Resources');
+  const command = path.join(app, platform === 'win32' ? 'Paseo.exe' : 'Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper');
   const runner = path.join(resources, 'app.asar.unpacked/dist/daemon/node-entrypoint-runner.js');
   // Paseo owns its SDK and transport configuration. Load its installed CLI
   // connection utility with its own Electron runtime (which understands asar).
   return { command, runner, clientModule: path.join(resources, 'app.asar/node_modules/@getpaseo/cli/dist/utils/client.js'), available: fs.existsSync(command) && fs.existsSync(runner) && fs.existsSync(path.join(resources, 'app.asar')) };
+  }
+  const found = candidates.map(locate);
+  return found.find(runtime => runtime.available) || found[0] || { available: false };
 }
 function createPaseo({ runner = createCliRunner(), runtime = desktopRuntime(), timeout = 600000 } = {}) {
   const queue = createQueue();

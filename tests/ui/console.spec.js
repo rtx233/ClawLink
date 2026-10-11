@@ -211,3 +211,24 @@ test('App 内开机自启开关通过原生桥接保存，失败时恢复原状�
   await expect(page.locator('#modalError')).toHaveText('系统拒绝注册'); await expect(page.locator('#launchAtLogin')).toBeChecked();
   expect(await page.evaluate(() => window.testLoginCalls.filter(action => action === 'setLaunchAtLogin').length)).toBe(2);
 });
+
+test('Windows 界面发现实际应用并携带 exe 身份绑定，不显示 Mac 权限入口', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.clawlinkDesktop = { platform: 'win32', invoke: async (action, fields) => ({ platform: 'win32', launchAtLogin: action === 'setLaunchAtLogin' && fields.enabled, loginStatus: 'notRegistered' }) };
+  });
+  await page.route('**/api/native/discover', route => route.fulfill({ json: { trusted: true, platform: 'win32', apps: [{ bundleId: 'win.fixture', name: 'Codex', path: 'C:\\Program Files\\Codex\\Codex.exe', windows: ['Windows 测试聊天'] }] } }));
+  await page.goto('/'); await page.click('[data-action="settings"]');
+  await expect(page.locator('#modalContent')).toContainText('登录 Windows 后自动启动');
+  await expect(page.locator('#modalContent')).toContainText('Windows UI Automation');
+  await expect(page.locator('#screenPermission')).toHaveCount(0);
+  await page.check('#launchAtLogin'); await expect(page.locator('#loginStatus')).toHaveText('开机自启已启用');
+  await page.keyboard.press('Escape'); await page.click('[data-view="sessions"]'); await page.click('#newSessionBtn');
+  await expect(page.locator('#sessionDiscoveryStatus')).toContainText('Windows');
+  await expect(page.locator('#sessionProvider option[value="ChatGPT"]')).toHaveCount(0);
+  await page.fill('#sessionName', 'Windows 前端绑定'); await page.click('#saveSession');
+  const inspected = page.waitForRequest(request => request.url().endsWith('/api/native/inspect'));
+  await page.click('#inspectWindow');
+  expect((await inspected).postDataJSON()).toMatchObject({ bundleId: 'win.fixture', executablePath: 'C:\\Program Files\\Codex\\Codex.exe', windowTitle: 'Windows 测试聊天' });
+  await page.selectOption('#markerPath', '0'); await page.selectOption('#inputPath', '1'); await page.selectOption('#replyPath', '2'); await page.selectOption('#sendPath', '3');
+  await page.click('#saveBinding'); await expect(page.locator('#modalBackdrop')).not.toHaveClass(/open/);
+});

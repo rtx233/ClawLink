@@ -38,3 +38,16 @@
 9. 在 App 设置开启登录后自启，按系统要求批准登录项；退出登录并重新登录后确认 App 和接收连接恢复。
 
 不要将 Token、验证码、配对码、聊天正文或私人会话截图加入公开发行记录。
+
+## Windows 同步版本
+
+2026-10-12 新增 Windows 10/11 x64 构建目标。共享机器人、路由、指令和权限代码；原生部分使用 Electron 窗口 / 托盘 / 当前用户自启，以及 .NET Framework UI Automation 连接器和主屏幕内存截图。
+
+| 项目 | 验证方式 / 待办 |
+| --- | --- |
+| 共享后端和前端 Windows 分支 | 本地协议测试、Windows npm shim / Paseo 路径测试、浏览器 Windows 桥接测试 |
+| Windows 构建、真实窗口、UIA 发送读取 / 草稿与身份保护 | GitHub Actions Windows runner 编译并运行 `test:windows`；以该提交实际运行结果为准 |
+| 安装包数据隔离和退出停止 | runner 启动 `win-unpacked/ClawLink.exe`，使用临时空数据和内置 Node；重启保留测试配置 |
+| 真实 Codex / ChatGPT / Claude / PI / Paseo Windows 目标 | 待用户实机验收，不把测试窗口当作目标应用兼容证明 |
+| Windows 自启、最低系统、NSIS 安装 / 升级过程 | 待用户实机验收；自动测试仅读取启动状态，不修改用户登录项 |
+| Authenticode 签名 | 未配置，当前 Windows 包未签名 |

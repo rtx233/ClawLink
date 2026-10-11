@@ -2,6 +2,7 @@
 node_modules/
 dist/
 native/ClawLinkBridge
+native/*.exe
 playwright-report/
 test-results/
 release/

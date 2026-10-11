@@ -5,7 +5,8 @@ const crypto = require('node:crypto');
 const { findExecutable, createQueue, createCliRunner } = require('./cli');
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function findCommand() {
-  return findExecutable([process.env.PI_CLI_PATH, path.join(os.homedir(), '.local/bin/pi'), '/opt/homebrew/bin/pi', '/usr/local/bin/pi', 'pi']);
+  const windowsEntry = process.platform === 'win32' ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData/Roaming'), 'npm/node_modules/@mariozechner/pi-coding-agent/dist/cli.js') : '';
+  return findExecutable([process.env.PI_CLI_PATH, windowsEntry, path.join(os.homedir(), '.local/bin/pi'), '/opt/homebrew/bin/pi', '/usr/local/bin/pi', 'pi']);
 }
 function headerOf(file) {
   const fd = fs.openSync(file, 'r');

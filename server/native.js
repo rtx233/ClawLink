@@ -2,14 +2,14 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const { setTimeout: delay } = require('node:timers/promises');
-const binary = path.resolve(__dirname, '../native/ClawLinkBridge');
+const binary = path.resolve(__dirname, `../native/ClawLinkBridge${process.platform === 'win32' ? '.exe' : ''}`);
 const children = new Set();
 process.once('exit', () => { for (const child of children) child.kill(); });
 function bridge(request) {
   return new Promise((resolve, reject) => {
-    if (process.platform !== 'darwin') return reject(new Error('原生会话连接目前支持 macOS'));
+    if (!['darwin', 'win32'].includes(process.platform)) return reject(new Error('原生会话连接支持 macOS 和 Windows'));
     if (!fs.existsSync(binary)) return reject(new Error('请先运行 npm run native:build 编译原生连接器'));
-    const child = spawn(binary, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(binary, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     children.add(child);
     let output = ''; let size = 0;
     const timer = setTimeout(() => { child.kill(); reject(new Error('原生连接器超时')); }, 20000);
@@ -67,4 +67,4 @@ function createNative({ call = bridge, interval = 1200, minWait = 10000, stableW
     close: () => { closed = true; if (call === bridge) for (const child of children) child.kill(); }
   };
 }
-module.exports = { createNative, extractReply, bridge };
+module.exports = { createNative, extractReply, bridge, binary };
