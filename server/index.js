@@ -30,7 +30,7 @@ const targetTone = bundleId => bundleId === PROVIDERS.Claude ? 'target-claude' :
 const targetLogo = bundleId => bundleId === PROVIDERS.Claude ? 'A' : bundleId === PROVIDERS.Paseo ? 'P' : bundleId === PROVIDERS.Codex ? 'C' : '✦';
 const makeId = prefix => `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
 const clean = (value, limit = 160) => String(value || '').trim().slice(0, limit);
-const initialState = () => ({ version: 2, bots: [], sessions: [], routes: [], peerRoutes: {}, activity: [], stats: { day: '', messages: 0, replies: 0, durationMs: 0 } });
+const initialState = () => ({ version: 2, preferences: { theme: 'system' }, bots: [], sessions: [], routes: [], peerRoutes: {}, activity: [], stats: { day: '', messages: 0, replies: 0, durationMs: 0 } });
 class HttpError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
 function readJson(file, fallback) {
   if (!fs.existsSync(file)) return fallback;
@@ -53,6 +53,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     state = initialState();
   }
   for (const rule of state.routes) rule.id ||= makeId('route');
+  state.preferences = { theme: ['system', 'light', 'dark'].includes(state.preferences?.theme) ? state.preferences.theme : 'system' };
   function authorizeWechatOwner(secret) {
     secret.allowedPeers ||= [];
     if (!secret.allowedPeers.includes(secret.ownerId)) secret.allowedPeers.push(secret.ownerId);
@@ -345,6 +346,12 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     if (method === 'GET' && pathname === '/api/targets/pi') return json(res, 200, await pi.discover());
     if (method === 'GET' && pathname === '/api/targets/paseo') return json(res, 200, await paseo.discover());
     const body = ['POST', 'PATCH', 'DELETE'].includes(method) ? await bodyOf(req) : {};
+    if (method === 'PATCH' && pathname === '/api/preferences') {
+      if (Object.keys(body).some(key => key !== 'theme')) throw new HttpError('未知的偏好设置');
+      if (!['system', 'light', 'dark'].includes(body.theme)) throw new HttpError('主题应为 system、light 或 dark');
+      state.preferences = { theme: body.theme }; save();
+      return json(res, 200, { preferences: state.preferences });
+    }
     if (method === 'PATCH' && pathname === '/api/commands/settings') { commands.update(body.commands); save(); return json(res, 200, { commands: commands.list() }); }
     if (method === 'POST' && pathname === '/api/screen/permission') return json(res, 200, await native.requestScreenPermission());
     const recipientMatch = pathname.match(/^\/api\/recipients\/([\w-]+)$/);

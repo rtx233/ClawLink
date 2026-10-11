@@ -1,9 +1,11 @@
-# ClawLink 1.0.0 发布验证记录
+# ClawLink 1.1.0 发布验证记录
 
-验证环境：2026-10-11，Apple Silicon arm64，macOS 27.0，Node 24.21.0。安装包声明最低 macOS 13.5；最低系统与其他机器尚未实机验证。
+验证环境：2026-10-12，Apple Silicon arm64，macOS 27.0，Node 24.21.0。安装包声明最低 macOS 13.5；最低系统与其他机器尚未实机验证。
 
 | 项目 | 结果 | 验证依据 |
 | --- | --- | --- |
+| Apache 2.0 许可证与安装包声明 | 已接入 | 官方协议全文、NOTICE、npm license 元数据；Mac / Windows 使用文档白名单附带协议 |
+| 主题切换与持久化 | 通过测试环境 | 暗 / 亮 / 跟随系统、系统外观动态变化、缓存清空后恢复、非法更新和保存失败；兼容旧账号 / 会话数据 |
 | 本地前后端 API 与持久化 | 通过 | 后端协议、路由、授权、重启及数据保护测试 |
 | 多机器人、共享 / 独立会话与聊天指令 | 通过测试环境 | `/pair`、`/switch`、自定义指令、单次广播与长轮询回传 |
 | 指令编辑、帮助与账户权限 | 通过测试环境 | 内置 / 自定义指令改名、说明、表情、冲突拒绝；动态帮助、入站 / 主动发送独立开关、逐条权限及重启保存 |
@@ -47,7 +49,7 @@
 | --- | --- |
 | 共享后端和前端 Windows 分支 | 本地协议测试、Windows npm shim / Paseo 路径测试、浏览器 Windows 桥接测试 |
 | Windows 构建、真实窗口、UIA 发送读取 / 草稿与身份保护 | GitHub Actions Windows runner 编译并运行 `test:windows`；以该提交实际运行结果为准 |
-| 安装包数据隔离和退出停止 | runner 启动 `win-unpacked/ClawLink.exe`，使用临时空数据和内置 Node；重启保留测试配置 |
+| 安装包数据隔离、主题恢复和退出停止 | runner 启动 `win-unpacked/ClawLink.exe`，使用临时空数据和内置 Node；重启保留测试配置 |
 | 真实 Codex / ChatGPT / Claude / PI / Paseo Windows 目标 | 待用户实机验收，不把测试窗口当作目标应用兼容证明 |
 | Windows 自启、最低系统、NSIS 安装 / 升级过程 | 待用户实机验收；自动测试仅读取启动状态，不修改用户登录项 |
 | Authenticode 签名 | 未配置，当前 Windows 包未签名 |

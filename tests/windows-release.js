@@ -24,6 +24,10 @@ test('Windows 安装产物：真实窗口、内置 Node、设置桥接、数据�
   assert.match(settings.appPath, /ClawLink\.exe$/);
   await page.click('[data-action="settings"]');
   await expect(page.locator('#modalContent')).toContainText('Windows UI Automation', { timeout: 20000 });
+  await expect(page.locator('#themeSelect')).toHaveValue('system');
+  await page.selectOption('#themeSelect', 'dark');
+  await expect(page.locator('#themeSelect')).toBeEnabled();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   assert.equal(await page.locator('#screenPermission').count(), 0);
   assert.equal(await page.locator('#launchAtLogin').isEnabled(), true);
   // Read-only startup check: never register login items from tests.
@@ -31,6 +35,7 @@ test('Windows 安装产物：真实窗口、内置 Node、设置桥接、数据�
   assert.equal(fs.existsSync(path.join(code, 'server/data')), false);
   assert.equal(fs.existsSync(path.join(code, 'backups')), false);
   assert.equal(fs.existsSync(path.join(code, '.env')), false);
+  for (const file of ['LICENSE', 'NOTICE']) assert.ok(fs.existsSync(path.resolve('release/win-unpacked/resources/notices', file)));
   await page.keyboard.press('Escape');
   const result = await fetch(`${url}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Windows 持久化测试', provider: 'PI', targetType: 'pi' }) }); assert.equal(result.status, 201);
   await desktop.close(); desktop = null;
@@ -40,6 +45,7 @@ test('Windows 安装产物：真实窗口、内置 Node、设置桥接、数据�
   assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'))).sessions[0].name, 'Windows 持久化测试');
   desktop = await electron.launch({ executablePath, env: { ...process.env, CLAWLINK_DATA_DIR: dataDir } });
   const reopened = await desktop.firstWindow(); await reopened.locator('#serviceStatus').filter({ hasText: '本地服务' }).waitFor();
+  await expect(reopened.locator('html')).toHaveAttribute('data-theme', 'dark');
   await reopened.click('[data-view="sessions"]');
   await expect(reopened.locator('#sessionGrid').getByRole('heading', { name: 'Windows 持久化测试', exact: true })).toBeVisible();
 });

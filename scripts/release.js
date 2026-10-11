@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const { version } = require('../package.json');
-const { serverFiles } = require('./package-files.cjs');
+const { serverFiles, documents } = require('./package-files.cjs');
 function run(command, args, options = {}) { return execFileSync(command, args, { cwd: root, stdio: 'inherit', ...options }); }
 function copy(source, destination) { fs.cpSync(source, destination, { recursive: true }); }
 async function main() {
@@ -31,8 +31,7 @@ async function main() {
     const nodeLicense = await fetch(`https://raw.githubusercontent.com/nodejs/node/v${process.versions.node}/LICENSE`, { signal: AbortSignal.timeout(20000) });
     if (!nodeLicense.ok) throw new Error('无法获取对应 Node 版本的许可证');
     fs.writeFileSync(path.join(resources, 'runtime/LICENSE'), await nodeLicense.text());
-    copy(path.join(root, 'README.md'), path.join(resources, 'README.md'));
-    copy(path.join(root, 'RELEASE_CHECKLIST.md'), path.join(resources, 'RELEASE_CHECKLIST.md'));
+    for (const file of documents) copy(path.join(root, file), path.join(resources, file));
     fs.writeFileSync(path.join(resources, 'THIRD_PARTY_NOTICES.txt'), `ClawLink includes Node.js ${process.version} (runtime/LICENSE) and QRCode with its npm dependencies. Each dependency's original LICENSE is included under app/node_modules.\n`);
     const icons = path.join(work, 'ClawLink.iconset'); fs.mkdirSync(icons);
     run('swift', ['scripts/icon.swift', icons]); run('iconutil', ['-c', 'icns', icons, '-o', path.join(resources, 'ClawLink.icns')]);

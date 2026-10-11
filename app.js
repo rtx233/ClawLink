@@ -13,6 +13,26 @@ window.clawlinkNative = (action, fields = {}) => new Promise((resolve, reject) =
 const triggerFor = id => commandSettings.find(item => item.id === id)?.trigger || `/${id}`;
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+let preferences = { theme: 'system' }, preferencesSaving = false, preferenceRevision = 0;
+try { const cached = localStorage.getItem('clawlink.theme'); if (['system', 'light', 'dark'].includes(cached)) preferences.theme = cached; } catch { /* Storage may be unavailable in embedded browsers. */ }
+function applyTheme(theme) {
+  preferences.theme = ['system', 'light', 'dark'].includes(theme) ? theme : 'system';
+  const dark = preferences.theme === 'dark' || preferences.theme === 'system' && systemTheme.matches;
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  $('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111923' : '#f7f8f7');
+  try { localStorage.setItem('clawlink.theme', preferences.theme); } catch { /* The server persists preferences across app ports and restarts. */ }
+  if ($('#themeSelect')) $('#themeSelect').value = preferences.theme;
+}
+applyTheme(preferences.theme);
+systemTheme.addEventListener('change', () => { if (preferences.theme === 'system') applyTheme('system'); });
+async function saveTheme(select) {
+  const previous = preferences.theme;
+  preferenceRevision += 1; preferencesSaving = true; applyTheme(select.value);
+  try { const result = await apiRequest('/preferences', { theme: preferences.theme }, 'PATCH'); applyTheme(result.preferences.theme); }
+  catch (error) { applyTheme(previous); if (select.isConnected) select.value = previous; throw error; }
+  finally { preferencesSaving = false; preferenceRevision += 1; if ($('#themeSelect')) $('#themeSelect').disabled = false; }
+}
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const statusLabels = { online: '在线', pending: '等待登录', connecting: '连接中', stopped: '已停止', expired: '登录过期', error: '需检查', verified: '已校验', unbound: '未绑定' };
 const time = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚无记录';
@@ -31,10 +51,12 @@ async function apiRequest(path, body, method = body === undefined ? 'GET' : 'POS
   return data;
 }
 async function syncStateFromApi() {
+  const revision = preferenceRevision;
   try {
     const remote = await apiRequest('/state');
     ({ bots, sessions, activity, peerRoutes, stats, service } = remote); recipients = remote.recipients || []; commandSettings = remote.commands || []; routeRules = remote.routes;
     targetById = Object.fromEntries(sessions.map(session => [session.id, session])); apiOnline = true;
+    if (!preferencesSaving && revision === preferenceRevision) applyTheme(remote.preferences?.theme);
     renderAll();
   } catch { apiOnline = false; renderService(); }
 }
@@ -344,7 +366,8 @@ function openPermissions(bot) {
   $('#savePermissions').dataset.botId = bot.id;
 }
 async function openSettings() {
-  const version = openModal('<h2 id="modalTitle">App 设置</h2><p>正在读取本机权限…</p>');
+  const version = openModal(`<h2 id="modalTitle">App 设置</h2><h3>外观</h3><label class="form-label">主题<select class="form-select" id="themeSelect"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="settings-hint">立即生效并保存在本机。跟随系统会随系统外观自动切换。</p><section id="systemSettings"><p>正在读取本机权限…</p></section>`);
+  $('#themeSelect').value = preferences.theme; $('#themeSelect').disabled = preferencesSaving;
   const embedded = !!(window.webkit?.messageHandlers?.clawlink || window.clawlinkDesktop?.invoke);
   const results = await Promise.allSettled([apiRequest('/native/discover'), apiRequest('/screen/status'), embedded ? window.clawlinkNative('getSettings') : Promise.resolve(null)]);
   if (version !== modalVersion) return;
@@ -353,7 +376,7 @@ async function openSettings() {
   const win = isWindows();
   const captureSettings = win ? `<p id="screenStatus">Windows 主屏幕截图：${screen?.allowed ? '桌面可用' : '桌面不可用或连接器未就绪'}。需在账户权限开启截图；锁屏时拒绝截图。</p>` : `<p id="screenStatus">屏幕录制权限：${screen?.allowed ? '已允许' : '尚未允许'}。还需在每个账户的「账户权限」开启截图。</p><button class="secondary-button" id="screenPermission">请求屏幕录制权限</button>${embedded ? '<button class="text-button" id="openScreenSettings">打开屏幕录制设置</button>' : ''}`;
   const nativeSettings = win ? `Windows UI Automation：${native?.trusted ? '连接器可用' : '连接器未就绪'}。无需 macOS 辅助功能授权；目标窗口需提供可读取的输入框和可调用的发送按钮。请以普通用户运行 ClawLink 和目标应用。` : `辅助功能：${native?.trusted ? '已允许' : '尚未允许'}`;
-  $('#modalContent').innerHTML = `<h2 id="modalTitle">App 设置</h2><h3>启动</h3>${embedded ? `<label class="checkbox-label"><input type="checkbox" id="launchAtLogin" ${app?.launchAtLogin ? 'checked' : ''} ${app ? '' : 'disabled'} />登录 ${win ? 'Windows' : 'Mac'} 后自动启动 ClawLink</label><p id="loginStatus">${app?.loginStatus === 'requiresApproval' ? '请在系统登录项中允许 ClawLink' : app?.launchAtLogin ? '开机自启已启用' : '开机自启未启用'}</p><button class="secondary-button" id="openLoginSettings">打开系统登录项</button>` : `<p>开机自启需要在 ${win ? 'Windows 安装版 ClawLink' : 'ClawLink.app'} 内设置。${win ? '请安装 Windows 安装包后打开 App。' : '运行 scripts/start.command 可打开 App 窗口。'}</p>`}<h3>屏幕截图</h3>${captureSettings}<h3>原生会话</h3><div class="pairing-box">${nativeSettings}<br />连接器：${esc(target.name || 'ClawLinkBridge')}<br /><code class="path-copy">${esc(target.path || '未返回路径')}</code><br />接收连接：${service.polling || 0}</div>${win ? '' : '<button class="secondary-button" id="nativePermission">请求辅助功能权限</button>'}<button class="text-button" id="refreshAppSettings">重新检查</button><div id="modalError" class="error-copy" role="alert"></div>`;
+  $('#systemSettings').innerHTML = `<h3>启动</h3>${embedded ? `<label class="checkbox-label"><input type="checkbox" id="launchAtLogin" ${app?.launchAtLogin ? 'checked' : ''} ${app ? '' : 'disabled'} />登录 ${win ? 'Windows' : 'Mac'} 后自动启动 ClawLink</label><p id="loginStatus">${app?.loginStatus === 'requiresApproval' ? '请在系统登录项中允许 ClawLink' : app?.launchAtLogin ? '开机自启已启用' : '开机自启未启用'}</p><button class="secondary-button" id="openLoginSettings">打开系统登录项</button>` : `<p>开机自启需要在 ${win ? 'Windows 安装版 ClawLink' : 'ClawLink.app'} 内设置。${win ? '请安装 Windows 安装包后打开 App。' : '运行 scripts/start.command 可打开 App 窗口。'}</p>`}<h3>屏幕截图</h3>${captureSettings}<h3>原生会话</h3><div class="pairing-box">${nativeSettings}<br />连接器：${esc(target.name || 'ClawLinkBridge')}<br /><code class="path-copy">${esc(target.path || '未返回路径')}</code><br />接收连接：${service.polling || 0}</div>${win ? '' : '<button class="secondary-button" id="nativePermission">请求辅助功能权限</button>'}<button class="text-button" id="refreshAppSettings">重新检查</button>`;
   if ($('#launchAtLogin')) $('#launchAtLogin').onchange = () => guarded($('#launchAtLogin'), async () => { const previous = app.launchAtLogin; try { const current = await window.clawlinkNative('setLaunchAtLogin', { enabled: $('#launchAtLogin').checked }); app.launchAtLogin = current.launchAtLogin; $('#launchAtLogin').checked = current.launchAtLogin; $('#loginStatus').textContent = current.loginStatus === 'requiresApproval' ? '请在系统登录项中允许 ClawLink' : current.launchAtLogin ? '开机自启已启用' : '开机自启未启用'; } catch (error) { $('#launchAtLogin').checked = previous; throw error; } });
 }
 function openRule(id) {
@@ -375,6 +398,7 @@ async function guarded(button, fn) {
   finally { if (button?.isConnected) button.disabled = button.dataset.sent === 'yes'; }
 }
 document.addEventListener('change', event => {
+  if (event.target.id === 'themeSelect') { const select = event.target; guarded(select, () => saveTheme(select)); }
   if (event.target.id === 'botPlatform') { const telegram = event.target.value === 'telegram'; $('#tokenField').hidden = !telegram; $('#createBot').textContent = telegram ? '验证并连接' : '创建并扫码'; }
 });
 document.addEventListener('click', async event => {

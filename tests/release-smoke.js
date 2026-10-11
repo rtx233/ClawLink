@@ -5,13 +5,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
-const { chromium } = require('@playwright/test');
+const { chromium, expect } = require('@playwright/test');
 const { version } = require('../package.json');
 
 test('独立安装包：内置 Node、生产页面、数据隔离、退出停止服务', { skip: process.platform !== 'darwin', timeout: 20000 }, async t => {
   const bundle = path.resolve(`release/ClawLink-${version}-arm64.app`);
   assert.ok(fs.existsSync(bundle), '先执行 npm run release');
   execFileSync('codesign', ['--verify', '--deep', '--strict', bundle]);
+  for (const file of ['LICENSE', 'NOTICE']) assert.ok(fs.existsSync(path.join(bundle, 'Contents/Resources', file)));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawlink-package-'));
   let diagnostic = '';
   const launcher = spawn(path.join(bundle, 'Contents/MacOS/ClawLink'), [], { env: { ...process.env, CLAWLINK_DATA_DIR: dir, CLAWLINK_NO_OPEN: '1', PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'ignore', 'pipe'] });
@@ -38,6 +39,13 @@ test('独立安装包：内置 Node、生产页面、数据隔离、退出停止
   const response = await page.goto(url); assert.equal(response.status(), 200);
   await page.locator('#serviceStatus').filter({ hasText: '本地服务' }).waitFor();
   assert.equal(await page.locator('#metricBots').textContent(), '0');
+  await page.click('[data-action="settings"]');
+  await page.selectOption('#themeSelect', 'dark'); await expect(page.locator('#themeSelect')).toBeEnabled();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => localStorage.clear()); await page.reload();
+  await expect(page.locator('#serviceStatus')).toContainText('本地服务');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.screenshot({ path: '/tmp/clawlink-release-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: '/tmp/clawlink-release-mobile.png', fullPage: true });
   assert.deepEqual(failures, []); await browser.close();
@@ -45,6 +53,7 @@ test('独立安装包：内置 Node、生产页面、数据隔离、退出停止
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
   assert.equal(fs.existsSync(path.join(dir, 'service.lock')), false);
   assert.ok(fs.existsSync(path.join(dir, 'state.json')), '退出保留配置');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'state.json'))).preferences.theme, 'dark');
 });
 
 test('真实 App 窗口：WKWebView 加载生产 UI 和原生设置桥接', { skip: process.platform !== 'darwin', timeout: 25000 }, async t => {

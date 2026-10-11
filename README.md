@@ -8,7 +8,7 @@
 
 Windows 与 macOS 共用微信 / Telegram 登录、路由切换、指令编辑、账户权限和 AI 主动发消息代码。Windows 使用 Electron 独立窗口及系统托盘、UI Automation 会话连接器；自带 Node 和 .NET Framework 连接器，无需另装 Node。当前为未签名的测试版本。
 
-GitHub 仓库的 **Actions → Windows build and validation** 在 `main` 更新时自动构建并验证；成功后从该次运行的 **Artifacts → ClawLink-Windows-x64** 下载。`ClawLink-1.0.0-Windows-x64-setup.exe` 为当前用户安装，ZIP 为解压运行版；普通更新安装包会保留 `%APPDATA%\ClawLink` 中的账号和配置。不要把自己的数据目录放进解压目录或上传到仓库。Mac 和 Windows 各自保存配置，不能同时接收同一个微信账号 / TG Token。
+GitHub 仓库的 **Actions → Windows build and validation** 在 `main` 更新时自动构建并验证；成功后从该次运行的 **Artifacts → ClawLink-Windows-x64** 下载。`ClawLink-1.1.0-Windows-x64-setup.exe` 为当前用户安装，ZIP 为解压运行版；普通更新安装包会保留 `%APPDATA%\ClawLink` 中的账号和配置。不要把自己的数据目录放进解压目录或上传到仓库。Mac 和 Windows 各自保存配置，不能同时接收同一个微信账号 / TG Token。
 
 安装后在「设置」开启「登录 Windows 后自动启动」。关闭窗口后继续在托盘接收消息，通过托盘「退出并停止机器人」结束服务。解压版开启自启后应保持 exe 路径不变。启动权限只用于当前用户，不需要管理员权限。截图截取主屏幕，只需开启账户截图权限；没有 macOS 的屏幕录制授权步骤，锁屏 / 无交互桌面时拒绝截图。
 
@@ -18,7 +18,7 @@ PI 支持 Windows npm 安装入口，或者用 `PI_CLI_PATH` 指定 `cli.js` 完
 
 ### macOS Apple Silicon
 
-`release/ClawLink-1.0.0-macOS-arm64.zip` 是 macOS 13.5+、Apple Silicon 的本地测试安装包。解压后将 `.app` 拖到「应用程序」并打开。安装包自带 Node、连接器和界面，无需安装开发工具；控制台直接显示在 ClawLink 的独立 App 窗口中，Dock 和菜单栏均有入口。关闭窗口后继续接收机器人消息；菜单栏或 Cmd+Q 退出时停止服务。
+`release/ClawLink-1.1.0-macOS-arm64.zip` 是 macOS 13.5+、Apple Silicon 的本地测试安装包。解压后将 `.app` 拖到「应用程序」并打开。安装包自带 Node、连接器和界面，无需安装开发工具；控制台直接显示在 ClawLink 的独立 App 窗口中，Dock 和菜单栏均有入口。关闭窗口后继续接收机器人消息；菜单栏或 Cmd+Q 退出时停止服务。
 
 在 App 的「设置」中开启「登录 Mac 后自动启动 ClawLink」。如系统要求批准，点击「打开系统登录项」，允许 ClawLink；界面按系统实际注册状态显示，不会默认开启自启。它在用户登录后运行，电脑仍需保持登录、联网。
 
@@ -48,6 +48,10 @@ npm start
 6. 添加微信机器人，使用微信扫描腾讯 iLink / OpenClaw 返回的二维码。如手机显示数字，在前端输入验证码。Telegram 使用 @BotFather 的 Bot Token，**不使用二维码登录**。一个账号 / Token 只应由一个服务接收消息。
 7. **微信扫码确认后自动授权扫码账号，无需 `/pair`**；已登录的旧微信账号也会自动兼容。Telegram 需在 Bot **私聊**中发送控制台提供的 `/pair 配对码`，授权此聊天。配对码使用后失效；可在机器人管理中生成新码。Telegram 群聊可手工填写群 ID（通常为负数），群内允许的成员共享该群路由。
 8. 给机器人发普通文字，转发到配置的会话。不同机器人可以选不同会话，也可以共享；前端「切换到此会话」或机器人 `/switch 会话名` 均可切换。会话菜单可手工发送测试消息确认完整回复。
+
+## 外观设置
+
+点击左侧「设置 → 主题」，选择 **暗色 / 亮色 / 跟随系统**。立即生效，默认跟随系统；系统外观变化时自动更新。偏好保存在本机数据目录，刷新、升级和重启换端口后仍保留；浏览器版、Mac 和 Windows 使用相同设置。
 
 ## 原生会话绑定说明
 
@@ -121,7 +125,7 @@ AI 工具只访问本机服务，凭据由 `ai-client.js` 从私有 `ai-endpoint
 Git 仓库只包含源码、依赖清单、构建脚本、测试和文档。`.gitignore` 排除运行数据、登录凭据、路由与聊天绑定、PI 会话文件、备份、日志、本地环境文件、编辑器及代理设置、签名密钥和生成的安装包。克隆仓库后需自行登录并配置，不会带入开发者的本地账号或会话。
 
 - 数据目录：源码版为 `server/data`；Mac 安装包为 `~/Library/Application Support/ClawLink`，Windows 安装包为 `%APPDATA%\ClawLink`。Windows 使用当前用户和 SYSTEM 的目录 ACL，子文件继承；Windows 不以 POSIX `600` 作为权限验证依据。
-- `state.json`：会话绑定、机器人元数据、路由、账户权限、指令名称和帮助说明、指标、最近 200 条活动。日志保存事件信息，不记录完整消息正文。
+- `state.json`：会话绑定、机器人元数据、路由、主题偏好、账户权限、指令名称和帮助说明、指标、最近 200 条活动。日志保存事件信息，不记录完整消息正文。
 - `secrets.json`：平台 Token、消息游标、去重记录、配对码、允许的聊天 ID、每个微信聊天的上下文、AI 工具本机令牌和发送去重记录。文件权限为 `600`、目录为 `700`；本地明文保存，未采用钥匙串加密。所有运行数据已加入 `.gitignore`，HTTP 不提供这些文件，状态接口不返回平台 Token、微信上下文或 AI 工具令牌。
 - `ai-endpoint.json`：启动时生成的本机端点和 AI 工具令牌，权限 `600`，退出时移除。MCP / CLI 每次调用重新读取，服务重启换端口后无需重启工具进程。收件人名称、开关和会话回复指令开关保存在 `state.json`。
 - `service.lock` 阻止同一数据目录的重复服务；已退出进程的锁可以恢复，无法读取的锁会保留并报告错误。安装包的 `service.log`、`endpoint.json`、`window-status.json` 用于本地启动诊断。迁移源码数据到 App 时，先停止源码服务，仅复制配置、凭据和需要的 PI 会话，不复制锁和临时端点；在 App 中重新复制 AI 接入配置，更新运行时及数据路径。
@@ -163,9 +167,9 @@ Windows CI 使用干净 checkout 构建，两个平台使用相同服务文件�
 如具备 Developer ID，构建时设置 `CLAWLINK_SIGN_IDENTITY` 为证书名称。随后使用自己的 Apple 公证配置提交 ZIP：
 
 ```bash
-xcrun notarytool submit release/ClawLink-1.0.0-macOS-arm64.zip --keychain-profile YOUR_PROFILE --wait
-xcrun stapler staple release/ClawLink-1.0.0-arm64.app
-spctl --assess --type execute --verbose release/ClawLink-1.0.0-arm64.app
+xcrun notarytool submit release/ClawLink-1.1.0-macOS-arm64.zip --keychain-profile YOUR_PROFILE --wait
+xcrun stapler staple release/ClawLink-1.1.0-arm64.app
+spctl --assess --type execute --verbose release/ClawLink-1.1.0-arm64.app
 ```
 
 公证成功、staple 与系统评估均通过后，再重新压缩已 staple 的 `.app` 并生成新校验和。构建产生的 manifest 默认记录 `notarized: false`；只有实际公证通过后才应更新发行记录。
@@ -190,3 +194,9 @@ spctl --assess --type execute --verbose release/ClawLink-1.0.0-arm64.app
 - `scripts/release.js`：独立安装包构建、签名和校验和。
 
 微信协议参考 `@tencent-weixin/openclaw-weixin` 2.4.10。软件独立实现 iLink 接入，不修改用户已有的 OpenClaw 配置。
+
+## 许可证
+
+ClawLink 自有源码以 [Apache License 2.0](LICENSE) 发布，版权声明见 [NOTICE](NOTICE)。允许在协议条件下使用、修改、分发和商业使用；分发时保留许可证、相关声明，并注明修改。协议含明确的专利授权，不授予商标使用权。
+
+第三方依赖和运行时遵循各自许可证。Mac 和 Windows 安装包附带 ClawLink 的 `LICENSE` / `NOTICE` 以及相应第三方声明，不会将第三方组件改为 Apache 2.0。
