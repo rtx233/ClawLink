@@ -14,8 +14,11 @@
     "test:native": "node --test tests/native-ax.js",
     "release": "node scripts/release.js",
     "test:release": "node --test tests/release-smoke.js",
+    "ai:mcp": "node server/ai-client.js mcp",
+    "ai:recipients": "node server/ai-client.js recipients",
+    "ai:send": "node server/ai-client.js send",
     "native:build": "swiftc native/ClawLinkBridge.swift -o native/ClawLinkBridge -framework Cocoa -framework ApplicationServices",
-    "check": "node --check app.js && node --check server/index.js && node --check server/adapters.js && node --check server/native.js && node --check server/runtime.js && node --check server/cli.js && node --check server/pi.js && node --check server/paseo.js && node --check server/paseo-core.cjs && node --check server/paseo-worker.mjs && node --check scripts/release.js"
+    "check": "node --check app.js && node --check server/index.js && node --check server/adapters.js && node --check server/native.js && node --check server/runtime.js && node --check server/cli.js && node --check server/pi.js && node --check server/paseo.js && node --check server/paseo-core.cjs && node --check server/paseo-worker.mjs && node --check server/messaging.js && node --check server/ai-client.js && node --check server/commands.js && node --check server/permissions.js && node --check scripts/release.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",

@@ -26,8 +26,8 @@ test('微信 / Telegram 共用 PI、Paseo 和原生目标，跨类型切换并�
     const bot = (await f.request('/api/bots', { name: platform, platform, token: TOKEN, target: native.id })).data.bot;
     if (platform === 'wechat') { const qr = (await f.request(`/api/bots/${bot.id}/login/start`, {})).data; await f.request(`/api/bots/${bot.id}/login/poll`, { loginId: qr.loginId }); }
     const live = f.app.viewState().bots.find(b => b.id === bot.id);
-    const event = text => ({ text, peerId: `${platform}-owner`, contextToken: 'ctx' });
-    await f.app.receive(live, event(`/pair ${bot.pairingCode}`));
+    const event = text => ({ text, peerId: platform === 'wechat' ? 'wx-owner' : 'telegram-owner', contextToken: 'ctx' });
+    if (platform === 'telegram') await f.app.receive(live, event(`/pair ${bot.pairingCode}`));
     for (const [destination, prefix] of [[pi, 'PI'], [paseo, 'Paseo'], [native, 'AI']]) {
       await f.app.receive(live, event(`/switch ${destination.name}`));
       await f.app.receive(live, event(`测试 ${platform}`));

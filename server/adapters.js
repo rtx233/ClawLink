@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 
 const WECHAT_BASE = 'https://ilinkai.weixin.qq.com';
+const WECHAT_CDN = 'https://novac2c.cdn.weixin.qq.com/c2c';
 // Protocol metadata from @tencent-weixin/openclaw-weixin 2.4.10.
 const VERSION = '2.4.10';
 const CLIENT_VERSION = (2 << 16) | (4 << 8) | 10;
@@ -27,7 +28,7 @@ function chunks(text, limit) {
   for (let i = 0; i < chars.length; i += limit) result.push(chars.slice(i, i + limit).join(''));
   return result;
 }
-function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramBase = 'https://api.telegram.org', allowTestHosts = false } = {}) {
+function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramBase = 'https://api.telegram.org', wechatCdn = WECHAT_CDN, allowTestHosts = false } = {}) {
   const validateBase = value => allowTestHosts ? new URL(value || wechatBase).origin : trustedWechatBase(value || wechatBase);
   async function request(url, options = {}, timeout = 18000, signal) {
     try {
@@ -98,6 +99,46 @@ function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramB
           item_list: [{ type: 1, text_item: { text: piece } }]
         } });
       }
+    },
+    async sendImage(bot, secret, event, bytes, { canSend = () => true } = {}) {
+      if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 10 * 1024 * 1024) throw new Error('图片为空或超过 10 MB');
+      const ensureAllowed = () => { if (!canSend()) throw new Error('截图权限已变更，未继续发送'); };
+      ensureAllowed();
+      const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      const jpeg = bytes[0] === 255 && bytes[1] === 216;
+      if (!png && !jpeg) throw new Error('截图必须为 PNG 或 JPEG 图片');
+      if (bot.platform === 'telegram') {
+        const form = new FormData(); form.append('chat_id', event.peerId);
+        form.append('photo', new Blob([bytes], { type: png ? 'image/png' : 'image/jpeg' }), `screenshot.${png ? 'png' : 'jpg'}`);
+        await request(`${telegramBase}/bot${secret.token}/sendPhoto`, { method: 'POST', body: form }, 38000);
+        return;
+      }
+      if (!event.contextToken) throw new Error('缺少微信消息上下文，请重新发送截图指令');
+      const key = crypto.randomBytes(16); const filekey = crypto.randomBytes(16).toString('hex');
+      const cipher = crypto.createCipheriv('aes-128-ecb', key, null);
+      const encrypted = Buffer.concat([cipher.update(bytes), cipher.final()]);
+      const upload = await wxPost(secret.base, 'getuploadurl', secret.token, {
+        filekey, media_type: 1, to_user_id: event.peerId, rawsize: bytes.length,
+        rawfilemd5: crypto.createHash('md5').update(bytes).digest('hex'), filesize: encrypted.length,
+        no_need_thumb: true, aeskey: key.toString('hex')
+      });
+      if (!upload.upload_full_url && !upload.upload_param) throw new Error('微信未返回图片上传地址');
+      const uploadURL = new URL(upload.upload_full_url || `${wechatCdn}/upload?${new URLSearchParams({ encrypted_query_param: upload.upload_param, filekey })}`);
+      if (!allowTestHosts && (uploadURL.protocol !== 'https:' || uploadURL.hostname !== 'novac2c.cdn.weixin.qq.com' || uploadURL.port || uploadURL.username || uploadURL.password)) throw new Error('微信返回了不受信任的图片上传地址');
+      ensureAllowed();
+      let response;
+      try { response = await fetchImpl(uploadURL, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: encrypted, redirect: 'error', signal: AbortSignal.timeout(38000) }); }
+      catch { throw new Error('微信图片上传未确认，请重新发送截图指令'); }
+      const downloadParam = response.headers.get('x-encrypted-param');
+      if (!response.ok || !downloadParam) throw new Error('微信图片上传失败或缺少下载参数');
+      await response.arrayBuffer();
+      ensureAllowed();
+      await wxPost(secret.base, 'sendmessage', secret.token, { msg: {
+        from_user_id: '', to_user_id: event.peerId, client_id: `clawlink-${crypto.randomUUID()}`,
+        message_type: 2, message_state: 2, context_token: event.contextToken,
+        item_list: [{ type: 2, image_item: { media: { encrypt_query_param: downloadParam,
+          aes_key: Buffer.from(key.toString('hex')).toString('base64'), encrypt_type: 1 }, mid_size: encrypted.length } }]
+      } });
     },
     async sendDirect(bot, secret, peerId, text) {
       if (!peerId) throw new Error('平台未返回可用的设备会话');

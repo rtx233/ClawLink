@@ -13,7 +13,7 @@ function bridge(request) {
     children.add(child);
     let output = ''; let size = 0;
     const timer = setTimeout(() => { child.kill(); reject(new Error('原生连接器超时')); }, 20000);
-    child.stdout.on('data', data => { size += data.length; if (size > 4_000_000) child.kill(); else output += data; });
+    child.stdout.on('data', data => { size += data.length; if (size > (request.action === 'screenshot' ? 16_000_000 : 4_000_000)) child.kill(); else output += data; });
     child.on('error', () => { clearTimeout(timer); reject(new Error('无法启动原生连接器')); });
     child.on('close', () => {
       children.delete(child);
@@ -42,6 +42,9 @@ function createNative({ call = bridge, interval = 1200, minWait = 10000, stableW
   return {
     discover: () => call({ action: 'discover' }),
     requestPermission: () => call({ action: 'permission' }),
+    screenStatus: () => call({ action: 'screenStatus' }),
+    requestScreenPermission: () => call({ action: 'screenPermission' }),
+    screenshot: async () => { ensureOpen(); const result = await call({ action: 'screenshot' }); ensureOpen(); return Buffer.from(result.base64, 'base64'); },
     inspect: binding => exclusive(() => { ensureOpen(); return call({ ...binding, action: 'inspect' }); }),
     validate: binding => exclusive(() => { ensureOpen(); return call({ ...binding, action: 'validate', activate: true }); }),
     send: (binding, text) => exclusive(async () => {

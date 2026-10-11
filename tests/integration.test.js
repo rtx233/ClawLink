@@ -10,6 +10,7 @@ test('真实协议扫码、验证码、凭据隔离及私有数据权限', async
   const f = await fixture(); t.after(() => f.close());
   const created = await f.request('/api/bots', { platform: 'wechat', name: '工作微信' });
   assert.equal(created.status, 201); const bot = created.data.bot;
+  assert.equal(bot.pairingCode, undefined);
   const qr = await f.request(`/api/bots/${bot.id}/login/start`, {});
   assert.match(qr.data.qrImage, /^data:image\/png;base64,/);
   const qrRequest = f.calls.find(x => x.path.endsWith('get_bot_qrcode'));
@@ -23,9 +24,16 @@ test('真实协议扫码、验证码、凭据隔离及私有数据权限', async
   assert.equal(result.data.welcomeSent, true);
   const qrPoll = f.calls.filter(x => x.path.endsWith('get_qrcode_status')).at(-1);
   assert.equal(qrPoll.query.verify_code, '123456');
-  assert.ok(f.sent.some(x => x.platform === 'wechat' && x.peer === 'wx-owner' && x.text.includes('/pair')));
+  assert.ok(f.sent.some(x => x.platform === 'wechat' && x.peer === 'wx-owner' && x.text.includes('自动授权') && !x.text.includes('/pair')));
   const state = await f.request('/api/state');
   assert.equal(state.data.bots[0].configured, true);
+  assert.deepEqual(state.data.bots[0].peers, ['wx-owner']);
+  assert.equal(state.data.bots[0].pairingCode, undefined);
+  const recipient = state.data.recipients.find(item => item.botId === bot.id);
+  assert.equal(recipient.peerId, 'wx-owner');
+  assert.equal(recipient.aiEnabled, false);
+  assert.equal(recipient.ready, false);
+  assert.equal((await f.request(`/api/bots/${bot.id}/pairing`, {})).status, 400);
   assert.ok(!JSON.stringify(state.data).includes('wx-private-test-token'));
   assert.equal((fs.statSync(path.join(f.dataDir, 'secrets.json')).mode & 0o777), 0o600);
   assert.equal((await f.request('/server/data/secrets.json')).status, 404);
@@ -43,6 +51,72 @@ test('真实协议扫码、验证码、凭据隔离及私有数据权限', async
   const nextQr = f.calls.filter(x => x.path.endsWith('get_bot_qrcode')).at(-1);
   assert.deepEqual(nextQr.body.local_token_list, ['wx-private-test-token']);
   assert.ok(!JSON.stringify(nextQr.body).includes(TOKEN), 'Telegram Token 不得传给微信服务');
+});
+
+test('微信缺少扫码本人身份时拒绝登录；欢迎消息失败不影响自动授权', async t => {
+  const f = await fixture(); t.after(() => f.close());
+  const bot = (await f.request('/api/bots', { platform: 'wechat', name: '微信' })).data.bot;
+  const qr = (await f.request(`/api/bots/${bot.id}/login/start`, {})).data;
+  f.setQrOwner('');
+  const invalid = await f.request(`/api/bots/${bot.id}/login/poll`, { loginId: qr.loginId });
+  assert.equal(invalid.status, 400); assert.match(invalid.data.error, /无法确认扫码账号/);
+  assert.equal(f.app.viewState().bots[0].configured, false);
+  assert.deepEqual(f.app.viewState().bots[0].peers, []); assert.equal(f.sent.length, 0);
+  f.setQrOwner('wx-owner'); f.setSendFailure(true);
+  const confirmed = await f.request(`/api/bots/${bot.id}/login/poll`, { loginId: qr.loginId });
+  assert.equal(confirmed.data.status, 'confirmed'); assert.equal(confirmed.data.welcomeSent, false);
+  assert.deepEqual(confirmed.data.bot.peers, ['wx-owner']);
+  assert.equal(confirmed.data.bot.status, 'online');
+  assert.equal(f.app.viewState().recipients[0].peerId, 'wx-owner');
+});
+
+test('旧微信登录自动迁移本人，保留设置；手动撤销后重启不会恢复授权', async t => {
+  const f = await fixture(); t.after(() => f.close()); const session = await f.session();
+  const wx = (await f.request('/api/bots', { platform: 'wechat', name: '微信', target: session.id })).data.bot;
+  const qr = (await f.request(`/api/bots/${wx.id}/login/start`, {})).data;
+  await f.request(`/api/bots/${wx.id}/login/poll`, { loginId: qr.loginId });
+  const tg = (await f.request('/api/bots', { platform: 'telegram', name: 'TG', token: TOKEN })).data.bot;
+  await f.request(`/api/bots/${wx.id}`, { allowedPeers: ['wx-extra'] }, 'PATCH');
+  const extra = f.app.viewState().recipients[0];
+  await f.request(`/api/recipients/${extra.id}`, { name: '保留的微信', aiEnabled: true }, 'PATCH');
+  const state = JSON.parse(fs.readFileSync(path.join(f.dataDir, 'state.json')));
+  const secrets = JSON.parse(fs.readFileSync(path.join(f.dataDir, 'secrets.json')));
+  delete secrets[wx.id].ownerAutoAuthorized;
+  secrets[wx.id].pairingCode = 'legacy-code';
+  secrets[wx.id].peerContexts['wx-extra'] = { contextToken: 'extra-context' };
+  const legacyDir = path.join(f.dataDir, 'legacy'); fs.mkdirSync(legacyDir);
+  const secretFile = path.join(legacyDir, 'secrets.json');
+  fs.writeFileSync(path.join(legacyDir, 'state.json'), JSON.stringify(state));
+  fs.writeFileSync(secretFile, JSON.stringify(secrets));
+  // No poll or welcome message is sent by the migration.
+  const sent = []; const adapters = { send: async (...args) => { sent.push(args); } };
+  const migrated = createApp({ dataDir: legacyDir, workers: false, native: f.native, adapters });
+  try {
+    const view = migrated.viewState();
+    assert.deepEqual(view.bots.find(bot => bot.id === wx.id).peers, ['wx-extra', 'wx-owner']);
+    assert.equal(view.bots.find(bot => bot.id === wx.id).pairingCode, undefined);
+    assert.equal(view.bots.find(bot => bot.id === tg.id).pairingCode, tg.pairingCode);
+    assert.deepEqual(view.sessions.map(({ users, ...session }) => session), state.sessions);
+    assert.deepEqual(view.routes, state.routes);
+    assert.equal(view.recipients.find(item => item.id === extra.id).name, '保留的微信');
+    assert.equal(view.recipients.find(item => item.id === extra.id).aiEnabled, true);
+    assert.equal(view.recipients.find(item => item.peerId === 'wx-owner').aiEnabled, false);
+    const saved = JSON.parse(fs.readFileSync(secretFile));
+    assert.equal(saved[wx.id].token, secrets[wx.id].token);
+    assert.equal(saved[wx.id].peerContexts['wx-extra'].contextToken, 'extra-context');
+    assert.equal(saved[wx.id].pairingCode, undefined);
+    await migrated.receive(view.bots.find(bot => bot.id === wx.id), { peerId: 'wx-stranger', text: '/pair legacy-code' });
+    assert.equal(sent.length, 0);
+  } finally { await migrated.close(); }
+  const revoked = JSON.parse(fs.readFileSync(secretFile));
+  revoked[wx.id].allowedPeers = ['wx-extra']; fs.writeFileSync(secretFile, JSON.stringify(revoked));
+  const restarted = createApp({ dataDir: legacyDir, workers: false, native: f.native, adapters });
+  try {
+    assert.deepEqual(restarted.viewState().bots.find(bot => bot.id === wx.id).peers, ['wx-extra']);
+    assert.ok(!restarted.viewState().recipients.some(item => item.peerId === 'wx-owner'));
+    await restarted.receive(restarted.viewState().bots.find(bot => bot.id === wx.id), { peerId: 'wx-owner', text: '已撤销' });
+    assert.equal(sent.length, 0);
+  } finally { await restarted.close(); }
 });
 
 test('重新扫码失败后停止旧接收，保留凭据并允许恢复', async t => {
@@ -121,20 +195,24 @@ test('Codex、Paseo 和自定义 Bundle ID 可以作为原生路由目标', asyn
   assert.equal((await f.request('/api/sessions', { name: '无效', targetType: 'native', provider: 'PI', bundleId: 'not a bundle id' })).status, 400);
 });
 
-test('入站微信完整链路：配对、/switch、原生发送、上下文回复', async t => {
+test('入站微信完整链路：扫码授权本人、忽略陌生人、/switch、上下文回复', async t => {
   const f = await fixture(); t.after(() => f.close()); const s = await f.session();
   const bot = (await f.request('/api/bots', { platform: 'wechat', name: '微信', target: s.id })).data.bot;
   const qr = (await f.request(`/api/bots/${bot.id}/login/start`, {})).data;
   await f.request(`/api/bots/${bot.id}/login/poll`, { loginId: qr.loginId });
   const internal = f.app.viewState().bots[0];
-  const event = text => ({ peerId: 'wx-peer', text, contextToken: 'context-1', id: text });
-  await f.app.receive(internal, event('未授权消息')); assert.equal(f.nativeCalls.length, 0);
-  await f.app.receive(internal, event(`/pair ${bot.pairingCode}`));
+  const event = (text, peerId = 'wx-owner') => ({ peerId, text, contextToken: 'context-1', id: text });
+  const before = f.sent.length;
+  await f.app.receive(internal, event('未授权消息', 'wx-stranger'));
+  await f.app.receive(internal, event('/pair old-code', 'wx-stranger'));
+  assert.equal(f.nativeCalls.length, 0); assert.equal(f.sent.length, before);
+  assert.deepEqual(f.app.viewState().bots[0].peers, ['wx-owner']);
   await f.app.receive(internal, event(`/switch ${s.name}`));
   await f.app.receive(internal, event('你好微信'));
   assert.equal(f.nativeCalls.at(-1).text, '你好微信');
   assert.equal(f.sent.at(-1).text, 'AI 回复：你好微信');
   assert.equal(f.sent.at(-1).contextToken, 'context-1');
+  assert.equal(f.app.viewState().recipients.find(item => item.botId === bot.id).ready, true);
   const wxSend = f.calls.find(x => x.path.endsWith('sendmessage'));
   assert.equal(wxSend.headers.authorization, 'Bearer wx-private-test-token');
   assert.equal(wxSend.body.msg.message_type, 2); assert.equal(wxSend.body.msg.message_state, 2);
@@ -145,6 +223,8 @@ test('入站微信完整链路：配对、/switch、原生发送、上下文回�
 test('Telegram 长轮询接收、去重、回复及停止恢复', async t => {
   const f = await fixture({ workers: true }); t.after(() => f.close()); const s = await f.session();
   const bot = (await f.request('/api/bots', { platform: 'telegram', name: 'TG', token: TOKEN, target: s.id })).data.bot;
+  await f.app.receive(bot, { peerId: '42', text: '配对前不转发', id: 'before-pair' });
+  assert.equal(f.nativeCalls.length, 0); assert.equal(f.sent.length, 0);
   const update = (id, text) => ({ update_id: id, message: { chat: { id: 42, type: 'private' }, from: { id: 42 }, date: Math.floor(Date.now() / 1000), text } });
   f.tgUpdates.push(update(1, `/pair ${bot.pairingCode}`), update(2, '真实入站'));
   await until(() => f.sent.some(x => x.text === 'AI 回复：真实入站'));

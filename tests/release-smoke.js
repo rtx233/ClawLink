@@ -46,3 +46,22 @@ test('独立安装包：内置 Node、生产页面、数据隔离、退出停止
   assert.equal(fs.existsSync(path.join(dir, 'service.lock')), false);
   assert.ok(fs.existsSync(path.join(dir, 'state.json')), '退出保留配置');
 });
+
+test('真实 App 窗口：WKWebView 加载生产 UI 和原生设置桥接', { skip: process.platform !== 'darwin', timeout: 25000 }, async t => {
+  const bundle = path.resolve(`release/ClawLink-${version}-arm64.app`);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawlink-window-'));
+  let diagnostic = '';
+  const launcher = spawn(path.join(bundle, 'Contents/MacOS/ClawLink'), [], { env: { ...process.env, CLAWLINK_DATA_DIR: dir, CLAWLINK_NO_OPEN: '0', PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  launcher.stderr.on('data', bytes => { diagnostic += bytes; });
+  const exited = new Promise(resolve => launcher.once('exit', resolve));
+  t.after(async () => { if (launcher.exitCode === null) { launcher.kill(); const timer = setTimeout(() => launcher.kill('SIGKILL'), 3500); await exited; clearTimeout(timer); } fs.rmSync(dir, { recursive: true, force: true }); });
+  const statusFile = path.join(dir, 'window-status.json');
+  for (let i = 0; i < 150 && !fs.existsSync(statusFile); i++) { if (launcher.exitCode !== null) throw new Error(diagnostic || 'App 提前退出'); await delay(100); }
+  assert.ok(fs.existsSync(statusFile), `真实 WKWebView 未加载 UI 或桥接未通过：${diagnostic}`);
+  const status = JSON.parse(fs.readFileSync(statusFile));
+  assert.equal(status.embedded, true); assert.equal(status.bridge, true); assert.match(status.title, /ClawLink/);
+  const { url } = JSON.parse(fs.readFileSync(path.join(dir, 'endpoint.json')));
+  const screen = await (await fetch(`${url}/api/screen/status`)).json();
+  assert.equal(typeof screen.allowed, 'boolean');
+  // This read-only test does not register a login item or request system screen access.
+});

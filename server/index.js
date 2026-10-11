@@ -9,6 +9,9 @@ const { createNative } = require('./native');
 const { createPi } = require('./pi');
 const { createPaseo } = require('./paseo');
 const { acquireLock } = require('./runtime');
+const { createMessaging } = require('./messaging');
+const { createCommands, parse } = require('./commands');
+const { permissionsFor, commandAllowed, patchPermissions } = require('./permissions');
 const { version } = require('../package.json');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -49,6 +52,19 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     state = initialState();
   }
   for (const rule of state.routes) rule.id ||= makeId('route');
+  function authorizeWechatOwner(secret) {
+    secret.allowedPeers ||= [];
+    if (!secret.allowedPeers.includes(secret.ownerId)) secret.allowedPeers.push(secret.ownerId);
+    secret.ownerAutoAuthorized = true;
+    delete secret.pairingCode;
+  }
+  for (const bot of state.bots) {
+    if (bot.platform !== 'wechat' || !secrets[bot.id]) continue;
+    const secret = secrets[bot.id];
+    // Upgrade existing logins once; a later manual revocation must survive restart.
+    if (secret.token && typeof secret.ownerId === 'string' && secret.ownerId.trim() && !secret.ownerAutoAuthorized) authorizeWechatOwner(secret);
+    delete secret.pairingCode;
+  }
   const logins = new Map(); const polling = new Map(); const inboundQueues = new Map(); const qrFlights = new Map(); const loginFlights = new Map();
   let closed = false;
   function save() { writeJson(secretsFile, secrets); writeJson(stateFile, state); }
@@ -56,6 +72,8 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     state.activity.unshift({ id: makeId('event'), text, kind, tone, icon: kind === '消息' ? '◉' : kind === '连接' ? '＋' : '↗', at: new Date().toISOString() });
     state.activity = state.activity.slice(0, 200);
   }
+  const commands = createCommands(state);
+  const messaging = createMessaging({ state, secrets, adapters, save, activity });
   const targetAdapter = binding => binding.type === 'pi' ? pi : binding.type === 'paseo' ? paseo : native;
   const botById = id => state.bots.find(bot => bot.id === id);
   const sessionById = id => state.sessions.find(session => session.id === id) || state.sessions.find(session => session.name === id);
@@ -70,9 +88,10 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
   }
   function viewState() {
     if (resetDailyStats()) save();
-    return { ...state, bots: state.bots.map(bot => ({ ...bot, configured: !!secrets[bot.id]?.token, pairingCode: secrets[bot.id]?.pairingCode,
+    return { ...state, commands: commands.list(), bots: state.bots.map(bot => ({ ...bot, permissions: permissionsFor(bot), configured: !!secrets[bot.id]?.token, pairingCode: secrets[bot.id]?.pairingCode,
       peers: secrets[bot.id]?.allowedPeers || [], route: sessionById(bot.target)?.name || '未指定' })),
       sessions: state.sessions.map(session => ({ ...session, users: state.bots.filter(bot => bot.target === session.id).length })),
+      recipients: messaging.list(),
       service: { online: true, platform: process.platform, nativeBuilt: fs.existsSync(path.join(rootDir, 'native/ClawLinkBridge')), polling: polling.size } };
   }
   function stopBot(botId) {
@@ -124,21 +143,25 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     next.finally(() => { if (inboundQueues.get(key) === next) inboundQueues.delete(key); });
   }
   async function receive(bot, event) {
+    bot = botById(bot.id);
+    if (!bot) return;
     const secret = secrets[bot.id];
     if (!secret || closed || !bot.enabled) return;
     const text = clean(event.text, 20000);
-    const [cmd, code] = text.split(/\s+/);
-    const command = cmd.replace(/@\w+$/, '');
-    if (command === '/pair') {
+    const { trigger, argument: code } = parse(text);
+    if (commands.match(trigger)?.id === 'pair' && bot.platform === 'telegram') {
+      if (!commandAllowed(bot, 'pair')) return;
       if (event.group) return;
       if (!secret.pairingCode || code !== secret.pairingCode) return;
       secret.allowedPeers ||= [];
       if (!secret.allowedPeers.includes(event.peerId)) secret.allowedPeers.push(event.peerId);
       delete secret.pairingCode;
+      messaging.syncRecipients(); messaging.rememberContext(bot, event);
       activity(`${bot.name} 已授权聊天 ${event.peerId}`, '连接', 'green'); save();
-      await adapters.send(bot, secret, event, '配对成功。发送 /sessions 查看会话，/switch 会话名 切换目标。'); return;
+      await adapters.send(bot, secret, event, `配对成功。发送 ${commands.get('sessions').trigger} 查看会话，${commands.get('switch').trigger} 会话名 切换目标。`); return;
     }
     if (!secret.allowedPeers?.includes(event.peerId)) return;
+    messaging.rememberContext(bot, event); save();
     if (!text) {
       await adapters.send(bot, secret, event, '目前支持文字消息和微信已转写的语音。请发送文字。'); return;
     }
@@ -150,14 +173,22 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     try { result = await commandForBot(bot, text, event.peerId); }
     catch (error) { result = { ok: false, reply: `处理失败：${error.message}` }; }
     // A platform reply failure must never re-run a native send.
-    try { await adapters.send(bot, secret, event, result.reply); }
-    catch { activity(`${bot.name} 回复发送失败；请检查平台状态，原生消息不会自动重发`, '消息'); save(); return; }
+    try {
+      if (closed || !bot.enabled || secrets[bot.id] !== secret || !secret.allowedPeers?.includes(event.peerId)) return;
+      if (result.image) {
+        if (!commandAllowed(bot, 'screenshot')) return;
+        await adapters.sendImage(bot, secret, event, result.image, { canSend: () => !closed && bot.enabled && secrets[bot.id] === secret && secret.allowedPeers?.includes(event.peerId) && commandAllowed(bot, 'screenshot') });
+      } else await adapters.send(bot, secret, event, result.reply);
+    }
+    catch { activity(`${bot.name} ${result.image ? '截图' : '回复'}发送失败；请检查平台状态，不会自动重发`, '消息'); save(); return; }
     resetDailyStats(); state.stats.replies += 1; state.stats.durationMs += Date.now() - start;
     activity(`${bot.name} → ${result.destination || '机器人指令'}，已回复聊天 ${event.peerId}`, '消息', result.ok ? 'green' : 'orange'); save();
   }
   async function commandForBot(bot, input, peerId = '') {
     const text = clean(input, 20000);
-    const [raw, ...parts] = text.split(/\s+/); const command = raw.replace(/@\w+$/, ''); const argument = parts.join(' ');
+    const { trigger: command, argument } = parse(text);
+    const action = commands.match(command)?.id;
+    if (action && !commandAllowed(bot, action)) return { ok: false, reply: '此账户未获准使用这条指令，请在 ClawLink 的账户权限中开启。' };
     const key = peerKey(bot, peerId);
     const defaultKey = peerKey(bot, '');
     const ownRoute = state.peerRoutes[key] || {};
@@ -165,10 +196,17 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     const botRules = state.routes.filter(rule => rule.bot === bot.id);
     const target = route.target || bot.target;
     const choices = state.sessions.map(session => `${session.name} (${session.id})${session.binding ? '' : ' [未绑定]'}`).join('\n');
-    if (['/help', '/start'].includes(command)) return { ok: true, reply: '/sessions 列出会话\n/route 当前路由\n/switch 会话名 切换\n/broadcast 下一条广播\n/pause 暂停\n/resume 恢复' };
-    if (command === '/sessions') return { ok: true, reply: choices || '请先在控制台添加并绑定目标会话。' };
-    if (command === '/route') return { ok: true, reply: `当前目标：${sessionById(target)?.name || '未指定'}\n状态：${route.paused ? '暂停' : '启用'}${route.broadcastNext ? '；下一条广播' : ''}\n${botRules.filter(x => x.on).map(x => `${x.command} → ${x.target === 'all' ? '全部会话' : sessionById(x.target)?.name}`).join('\n')}` };
-    if (command === '/switch') {
+    if (['help', 'start'].includes(action)) return { ok: true, reply: commands.help(bot, id => commandAllowed(bot, id)) };
+    if (action === 'pair') return { ok: false, reply: bot.platform === 'wechat' ? '微信扫码后已自动授权，无需配对。' : '请在机器人私聊中发送配对指令和配对码。' };
+    if (action === 'screenshot') {
+      if (!peerId) return { ok: false, reply: '请从已授权的微信或 Telegram 聊天发送截图指令。' };
+      const image = await native.screenshot();
+      if (!Buffer.isBuffer(image) || !image.length || image.length > 10 * 1024 * 1024) throw new Error('截图为空或超过 10 MB，未发送');
+      return { ok: true, reply: '当前主屏幕截图', image };
+    }
+    if (action === 'sessions') return { ok: true, reply: choices || '请先在控制台添加并绑定目标会话。' };
+    if (action === 'route') return { ok: true, reply: `当前目标：${sessionById(target)?.name || '未指定'}\n状态：${route.paused ? '暂停' : '启用'}${route.broadcastNext ? '；下一条广播' : ''}\n${botRules.filter(x => x.on).map(x => `${x.command} → ${x.target === 'all' ? '全部会话' : sessionById(x.target)?.name}`).join('\n')}` };
+    if (action === 'switch') {
       const destination = sessionById(argument);
       if (!destination) return { ok: false, reply: `找不到会话：${argument || '未指定'}\n${choices}` };
       if (!destination.binding) return { ok: false, reply: '此会话尚未绑定目标，请先在控制台完成绑定。' };
@@ -183,18 +221,20 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       activity(`${bot.name}${peerId ? ` / ${peerId}` : ''} 切换到 ${destination.name}`); save();
       return { ok: true, reply: `已切换到「${destination.name}」。${['pi', 'paseo'].includes(destination.binding.type) ? '下一条消息会按会话 ID 发送到此目标。' : destination.binding.navigationPath ? '下一条消息会自动打开并校验目标会话。' : '请保持目标原生聊天打开；发送前会校验会话标识。'}` };
     }
-    if (['/pause', '/resume', '/broadcast'].includes(command)) {
-      if (command === '/broadcast' && !state.sessions.some(x => x.binding)) return { ok: false, reply: '没有已绑定的会话。' };
-      state.peerRoutes[key] = { ...route, ...(command === '/broadcast' ? { broadcastNext: true, paused: false } : { paused: command === '/pause' }) };
-      save(); return { ok: true, reply: command === '/broadcast' ? '下一条普通消息将发送到全部已绑定会话。' : command === '/pause' ? '已暂停当前聊天的消息路由。' : '已恢复当前聊天的消息路由。' };
+    if (['pause', 'resume', 'broadcast'].includes(action)) {
+      if (action === 'broadcast' && !state.sessions.some(x => x.binding)) return { ok: false, reply: '没有已绑定的会话。' };
+      state.peerRoutes[key] = { ...route, ...(action === 'broadcast' ? { broadcastNext: true, paused: false } : { paused: action === 'pause' }) };
+      save(); return { ok: true, reply: action === 'broadcast' ? '下一条普通消息将发送到全部已绑定会话。' : action === 'pause' ? '已暂停当前聊天的消息路由。' : '已恢复当前聊天的消息路由。' };
     }
     if (!text) return { ok: false, reply: '消息不能为空。' };
-    if (route.paused) return { ok: false, reply: '当前路由已暂停，发送 /resume 恢复。' };
+    if (route.paused) return { ok: false, reply: `当前路由已暂停，发送 ${commands.get('resume').trigger} 恢复。` };
     const matched = botRules.find(rule => rule.on && rule.command !== '默认' && rule.command === command);
+    if (matched && !commandAllowed(bot, `route:${matched.id}`)) return { ok: false, reply: '此账户未获准使用这条路由指令。' };
     const fallback = botRules.find(rule => rule.on && rule.command === '默认');
     const broadcast = route.broadcastNext && !command.startsWith('/');
     const destinationId = broadcast ? 'all' : matched?.target || route.target || fallback?.target;
-    if (command.startsWith('/') && !matched) return { ok: false, reply: '未知指令，发送 /help 查看指令。' };
+    if (command.startsWith('/') && !matched) return { ok: false, reply: `未知指令，发送 ${commands.get('help').trigger} 查看指令。` };
+    if (!permissionsFor(bot).forwardMessages) return { ok: false, reply: '此账户已关闭向 AI 发消息，可在账户权限中开启。' };
     const message = matched ? argument : text;
     if (!message) return { ok: false, reply: '请在路由指令后输入消息内容。' };
     if (!destinationId) return { ok: false, reply: '未配置可用路由，请先在控制台绑定会话。' };
@@ -206,11 +246,14 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     if (!destinations.length) return { ok: false, reply: '没有已绑定的会话。' };
     const replies = [];
     for (const session of destinations) {
+      if (!permissionsFor(bot).forwardMessages || peerId && (!bot.enabled || !secrets[bot.id]?.allowedPeers?.includes(peerId))) { replies.push({ name: session.name, ok: false, text: '账户权限已变更，已停止转发。' }); break; }
       try {
         if (!session.binding) throw new Error('会话未绑定目标');
-        const reply = await targetAdapter(session.binding).send(session.binding, message);
+        const context = messaging.preparePrompt(session, message);
+        const reply = await targetAdapter(session.binding).send(session.binding, context.message);
+        const processed = peerId && (!bot.enabled || !secrets[bot.id]?.allowedPeers?.includes(peerId) || !permissionsFor(bot).forwardMessages) ? { ok: false, text: '账户权限已变更，未执行回复中的发送指令。' } : await messaging.handleReply(session, reply, context);
         session.status = 'verified'; session.lastVerifiedAt = new Date().toISOString(); delete session.error;
-        replies.push({ name: session.name, ok: true, text: reply });
+        replies.push({ name: session.name, ok: processed.ok, text: processed.text });
       } catch (error) { session.status = 'error'; session.error = error.message; replies.push({ name: session.name, ok: false, text: `发送失败：${error.message}` }); }
       save();
     }
@@ -244,22 +287,25 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       if (logins.get(bot.id) !== login) throw new HttpError('二维码已更新，请使用新二维码');
       if (data.status === 'scaned_but_redirect' && data.redirect_host) login.base = adapters.validateBase(`https://${data.redirect_host}`);
       if (data.status === 'confirmed') {
-        if (!data.bot_token || !data.ilink_bot_id) throw new HttpError('微信登录确认信息不完整，请重新扫码');
+        if (!data.bot_token || !data.ilink_bot_id || typeof data.ilink_user_id !== 'string' || !data.ilink_user_id.trim()) throw new HttpError('微信登录确认信息不完整，无法确认扫码账号，请重新扫码');
         if (state.bots.some(x => x.id !== bot.id && x.handle === data.ilink_bot_id)) throw new HttpError('此微信已连接，请使用已有机器人');
         const base = adapters.validateBase(data.baseurl || login.base);
-        secrets[bot.id] = { ...secrets[bot.id], token: data.bot_token, base, ownerId: data.ilink_user_id, cursor: '', seen: [] };
+        secrets[bot.id] = { ...secrets[bot.id], token: data.bot_token, base, ownerId: data.ilink_user_id, cursor: '', seen: [], peerContexts: {} };
+        authorizeWechatOwner(secrets[bot.id]);
+        messaging.syncRecipients();
         bot.handle = data.ilink_bot_id; logins.delete(bot.id); activity(`${bot.name} 微信扫码成功`, '连接', 'green');
+        save();
         let welcomeSent = false;
         let welcomeError = '';
         try {
           await adapters.sendDirect(bot, secrets[bot.id], data.ilink_user_id,
-            `ClawLink 已连接此微信。\n请在此微信私聊中发送：\n/pair ${secrets[bot.id].pairingCode}\n完成授权后即可接收消息。`);
+            `ClawLink 已连接此微信，扫码账号已自动授权。\n发送 ${commands.get('sessions').trigger} 查看会话，发送 ${commands.get('switch').trigger} 会话名 切换目标。\n请先发一条消息，让 ClawLink 取得此聊天的发送上下文。`);
           welcomeSent = true;
-          activity(`${bot.name} 已向微信设备发送配对提示`, '连接', 'green');
+          activity(`${bot.name} 已向微信设备发送连接成功提示`, '连接', 'green');
         } catch (error) {
           welcomeError = `欢迎提示发送失败：${error.message}`;
           bot.error = welcomeError;
-          activity(`${bot.name} 欢迎提示发送失败，请从机器人设置复制配对指令`, '连接');
+          activity(`${bot.name} 欢迎提示发送失败，扫码账号已授权，可直接给机器人发消息`, '连接');
         }
         connectBot(bot); if (welcomeError) bot.error = welcomeError; save();
         return { status: 'confirmed', welcomeSent, bot: viewState().bots.find(x => x.id === bot.id) };
@@ -279,12 +325,30 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
   function json(res, code, value) { const body = JSON.stringify(value); res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(body); }
   async function api(req, res, url) {
     const method = req.method; const pathname = url.pathname;
+    if (pathname === '/api/ai/recipients' || pathname === '/api/ai/send') {
+      const supplied = Buffer.from(req.headers.authorization || ''); const expected = Buffer.from(`Bearer ${messaging.token}`);
+      if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) throw new HttpError('AI 工具凭据无效，请使用本机 ai-client.js', 401);
+      if (method === 'GET' && pathname.endsWith('/recipients')) return json(res, 200, { recipients: messaging.list({ aiOnly: true }).map(({ id, name, botName, platform, ready, unavailableReason }) => ({ id, name, botName, platform, ready, unavailableReason })) });
+      if (method === 'POST' && pathname.endsWith('/send')) return json(res, 200, await messaging.send(await bodyOf(req)));
+      throw new HttpError('接口不存在', 404);
+    }
+    if (method === 'GET' && pathname === '/api/ai/config') return json(res, 200, {
+      mcp: { mcpServers: { clawlink: { command: process.execPath, args: [path.join(__dirname, 'ai-client.js'), 'mcp', '--data-dir', path.resolve(dataDir)] } } },
+      cli: { command: process.execPath, args: [path.join(__dirname, 'ai-client.js'), 'recipients', '--data-dir', path.resolve(dataDir)] }
+    });
     if (method === 'GET' && pathname === '/api/health') return json(res, 200, { ok: true, service: 'clawlink', version, platform: process.platform });
     if (method === 'GET' && pathname === '/api/state') return json(res, 200, viewState());
+    if (method === 'GET' && pathname === '/api/screen/status') return json(res, 200, await native.screenStatus());
+    if (method === 'GET' && pathname === '/api/commands/settings') return json(res, 200, { commands: commands.list() });
     if (method === 'GET' && pathname === '/api/native/discover') return json(res, 200, await native.discover());
     if (method === 'GET' && pathname === '/api/targets/pi') return json(res, 200, await pi.discover());
     if (method === 'GET' && pathname === '/api/targets/paseo') return json(res, 200, await paseo.discover());
     const body = ['POST', 'PATCH', 'DELETE'].includes(method) ? await bodyOf(req) : {};
+    if (method === 'PATCH' && pathname === '/api/commands/settings') { commands.update(body.commands); save(); return json(res, 200, { commands: commands.list() }); }
+    if (method === 'POST' && pathname === '/api/screen/permission') return json(res, 200, await native.requestScreenPermission());
+    const recipientMatch = pathname.match(/^\/api\/recipients\/([\w-]+)$/);
+    if (method === 'PATCH' && recipientMatch) return json(res, 200, { recipient: messaging.patch(recipientMatch[1], body) });
+    if (method === 'POST' && pathname === '/api/messages/send') return json(res, 200, await messaging.send(body, { ai: false, source: '控制台' }));
     if (method === 'POST' && pathname === '/api/native/permission') return json(res, 200, await native.requestPermission());
     if (method === 'POST' && pathname === '/api/bots') {
       if (!['wechat', 'telegram'].includes(body.platform)) throw new HttpError('平台应为 wechat 或 telegram');
@@ -297,7 +361,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
         if (state.bots.some(x => x.platform === 'telegram' && x.handle === `@${validated.username}`)) throw new HttpError('此 Telegram 机器人已连接');
         bot.handle = `@${validated.username}`;
       }
-      secrets[bot.id] = { pairingCode: crypto.randomBytes(5).toString('hex'), allowedPeers: [], ...(validated ? { token: clean(body.token, 250), offset: 0, seen: [] } : {}) };
+      secrets[bot.id] = { allowedPeers: [], ...(validated ? { pairingCode: crypto.randomBytes(5).toString('hex'), token: clean(body.token, 250), offset: 0, seen: [] } : {}) };
       state.bots.push(bot); if (target) state.routes.push({ id: makeId('route'), bot: bot.id, command: '默认', target, on: true });
       activity(`创建机器人 ${name}`, '连接'); if (validated) connectBot(bot); save();
       return json(res, 201, { bot: viewState().bots.find(x => x.id === bot.id) });
@@ -309,7 +373,10 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       if (method === 'POST' && action === 'login/poll') return json(res, 200, await pollLogin(bot, body));
       if (method === 'POST' && action === 'start') { if (!secrets[bot.id]?.token) throw new HttpError('尚未完成登录'); connectBot(bot); save(); return json(res, 200, { ok: true }); }
       if (method === 'POST' && action === 'stop') { stopBot(bot.id); bot.enabled = false; bot.status = 'stopped'; save(); return json(res, 200, { ok: true }); }
-      if (method === 'POST' && action === 'pairing') { secrets[bot.id].pairingCode = crypto.randomBytes(5).toString('hex'); save(); return json(res, 200, { code: secrets[bot.id].pairingCode }); }
+      if (method === 'POST' && action === 'pairing') {
+        if (bot.platform !== 'telegram') throw new HttpError('微信扫码后自动授权本人，无需配对码');
+        secrets[bot.id].pairingCode = crypto.randomBytes(5).toString('hex'); save(); return json(res, 200, { code: secrets[bot.id].pairingCode });
+      }
       if (method === 'POST' && action === 'telegram') {
         if (bot.platform !== 'telegram') throw new HttpError('不是 Telegram 机器人');
         const token = clean(body.token, 250); const me = await adapters.telegramValidate(token);
@@ -317,15 +384,20 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
         stopBot(bot.id); secrets[bot.id] = { ...secrets[bot.id], token, offset: 0, seen: [] }; bot.handle = `@${me.username}`; connectBot(bot); save(); return json(res, 200, { ok: true });
       }
       if (method === 'PATCH' && !action) {
-        if (body.allowedPeers) { if (!Array.isArray(body.allowedPeers) || body.allowedPeers.some(x => typeof x !== 'string')) throw new HttpError('聊天 ID 必须是字符串列表'); secrets[bot.id].allowedPeers = [...new Set(body.allowedPeers.map(x => clean(x)))].filter(Boolean); }
+        if (Object.hasOwn(body, 'allowedPeers') && (!Array.isArray(body.allowedPeers) || body.allowedPeers.some(x => typeof x !== 'string'))) throw new HttpError('聊天 ID 必须是字符串列表');
+        if (Object.hasOwn(body, 'permissions')) patchPermissions(bot, body.permissions, [...commands.list().map(item => item.id), ...state.routes.filter(rule => rule.bot === bot.id && rule.command !== '默认').map(rule => `route:${rule.id}`)]);
+        if (body.allowedPeers) { secrets[bot.id].allowedPeers = [...new Set(body.allowedPeers.map(x => clean(x)))].filter(Boolean); messaging.syncRecipients(); }
         if (body.name) bot.name = clean(body.name); save(); return json(res, 200, { ok: true });
       }
-      if (method === 'DELETE' && !action) { stopBot(bot.id); bot.enabled = false; state.bots = state.bots.filter(x => x.id !== bot.id); state.routes = state.routes.filter(x => x.bot !== bot.id); Object.keys(state.peerRoutes).filter(x => JSON.parse(x)[0] === bot.id).forEach(x => delete state.peerRoutes[x]); delete secrets[bot.id]; logins.delete(bot.id); save(); return json(res, 200, { ok: true }); }
+      if (method === 'DELETE' && !action) { stopBot(bot.id); bot.enabled = false; state.bots = state.bots.filter(x => x.id !== bot.id); state.routes = state.routes.filter(x => x.bot !== bot.id); Object.keys(state.peerRoutes).filter(x => JSON.parse(x)[0] === bot.id).forEach(x => delete state.peerRoutes[x]); delete secrets[bot.id]; messaging.syncRecipients(); logins.delete(bot.id); save(); return json(res, 200, { ok: true }); }
     }
     if (method === 'POST' && pathname === '/api/commands') {
       const bot = requireBot(body.botId); const peerId = clean(body.peerId);
       if (peerId && !secrets[bot.id]?.allowedPeers?.includes(peerId)) throw new HttpError('此聊天尚未授权');
-      return json(res, 200, await commandForBot(bot, body.text, peerId));
+      if (body.action && !['switch', 'broadcast', 'pause', 'resume'].includes(body.action)) throw new HttpError('控制台操作无效');
+      const text = body.action ? `${commands.get(body.action).trigger} ${clean(body.argument)}` : body.text;
+      if (commands.match(parse(text).trigger)?.id === 'screenshot') throw new HttpError('请在授权的微信或 Telegram 聊天中发送截图指令');
+      return json(res, 200, await commandForBot(bot, text, peerId));
     }
     if (method === 'POST' && pathname === '/api/sessions') {
       const name = clean(body.name);
@@ -384,6 +456,11 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       } catch (error) { session.status = 'error'; session.error = error.message; save(); throw error; }
     }
     const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/);
+    if (method === 'PATCH' && sessionMatch) {
+      const session = requireSession(sessionMatch[1]);
+      if (typeof body.aiMessaging !== 'boolean') throw new HttpError('请选择是否开启回复指令发送');
+      session.aiMessaging = body.aiMessaging; save(); return json(res, 200, { session });
+    }
     if (method === 'DELETE' && sessionMatch) {
       const session = requireSession(sessionMatch[1]);
       if (state.routes.some(x => x.target === session.id) || Object.values(state.peerRoutes).some(x => x.target === session.id)) throw new HttpError('请先切换或移除此会话的路由规则');
@@ -391,10 +468,9 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     }
     if (method === 'POST' && pathname === '/api/routes') {
       const bot = requireBot(body.bot); const target = body.target === 'all' ? 'all' : requireSession(body.target).id;
-      const command = clean(body.command, 60); const reserved = ['/switch', '/route', '/sessions', '/broadcast', '/pause', '/resume', '/pair', '/help', '/start'];
-      if (command !== '默认' && (!/^\/[A-Za-z0-9_]+$/.test(command) || reserved.includes(command))) throw new HttpError('请输入 /research 等自定义指令，或“默认”；不能覆盖内置指令');
-      if (state.routes.some(x => x.bot === bot.id && x.command === command)) throw new HttpError('此机器人已有同名规则');
-      const route = { id: makeId('route'), bot: bot.id, target, command, on: body.on !== false }; state.routes.push(route);
+      const command = String(body.command || '').trim(); commands.validateRoute(command, bot.id);
+      const meta = command === '默认' ? {} : commands.metadata({ trigger: command, description: body.description ?? '发送到指定会话', emoji: body.emoji || '' });
+      const route = { id: makeId('route'), bot: bot.id, target, command, description: meta.description || '', emoji: meta.emoji || '', on: body.on !== false }; state.routes.push(route);
       if (command === '默认') bot.target = target; activity(`为 ${bot.name} 创建 ${command} 路由`); save(); return json(res, 201, { route });
     }
     const routeMatch = pathname.match(/^\/api\/routes\/([\w-]+)$/);
@@ -402,8 +478,14 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       const route = /^\d+$/.test(routeMatch[1]) ? state.routes[Number(routeMatch[1])] : state.routes.find(x => x.id === routeMatch[1]); if (!route) throw new HttpError('规则不存在', 404);
       if (method === 'DELETE') { state.routes.splice(state.routes.indexOf(route), 1); if (route.command === '默认') requireBot(route.bot).target = ''; }
       else {
+        const command = body.command === undefined ? route.command : String(body.command).trim();
+        if ((route.command === '默认') !== (command === '默认')) throw new HttpError('默认路由不使用触发指令，请另建自定义路由');
+        commands.validateRoute(command, route.bot, route.id);
+        const meta = command === '默认' ? {} : commands.metadata({ trigger: command, description: body.description ?? route.description ?? '发送到指定会话', emoji: body.emoji ?? route.emoji ?? '' });
+        const target = body.target ? body.target === 'all' ? 'all' : requireSession(body.target).id : route.target;
+        route.command = command; route.description = meta.description || ''; route.emoji = meta.emoji || '';
         if (typeof body.on === 'boolean') route.on = body.on;
-        if (body.target) { route.target = body.target === 'all' ? 'all' : requireSession(body.target).id; if (route.command === '默认') requireBot(route.bot).target = route.target; }
+        if (body.target) { route.target = target; if (route.command === '默认') requireBot(route.bot).target = route.target; }
       }
       save(); return json(res, 200, { ok: true });
     }
@@ -430,13 +512,15 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       fs.createReadStream(fullPath).on('error', () => res.destroy()).pipe(res);
     } catch (error) { if (!res.headersSent) json(res, error.status || 400, { error: error.message || '请求失败' }); else res.end(); }
   });
+  const aiEndpointFile = path.join(dataDir, 'ai-endpoint.json');
+  server.on('listening', () => writeJson(aiEndpointFile, { url: `http://127.0.0.1:${server.address().port}`, token: messaging.token }));
   // Online means a poll actually succeeded, never just that a credential exists.
   for (const bot of state.bots) {
     if (secrets[bot.id]?.token && bot.enabled) connectBot(bot);
     else bot.status = secrets[bot.id]?.token ? 'stopped' : 'pending';
   }
   save();
-  return { server, viewState, commandForBot, receive, async close() { closed = true; for (const id of polling.keys()) stopBot(id); native.close?.(); pi.close?.(); paseo.close?.(); save(); if (server.listening) await new Promise(resolve => server.close(resolve)); } };
+  return { server, viewState, commandForBot, receive, async close() { closed = true; messaging.close(); for (const id of polling.keys()) stopBot(id); native.close?.(); pi.close?.(); paseo.close?.(); save(); if (server.listening) await new Promise(resolve => server.close(resolve)); if (fs.existsSync(aiEndpointFile)) fs.unlinkSync(aiEndpointFile); } };
 }
 if (require.main === module) {
   const dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirname, 'data');

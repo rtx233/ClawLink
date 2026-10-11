@@ -30,12 +30,14 @@
           <button class="nav-item" data-view="bots" aria-label="机器人"><span class="nav-icon">◌</span><span>机器人</span><span class="nav-count">0</span></button>
           <button class="nav-item" data-view="routing" aria-label="路由规则"><span class="nav-icon">↗</span><span>路由规则</span></button>
           <button class="nav-item" data-view="sessions" aria-label="会话空间"><span class="nav-icon">□</span><span>会话空间</span></button>
+          <button class="nav-item" data-view="messaging" aria-label="AI 发消息"><span class="nav-icon">✉</span><span>AI 发消息</span></button>
           <button class="nav-item" data-view="activity" aria-label="活动日志"><span class="nav-icon">◷</span><span>活动日志</span><span class="nav-count muted">0</span></button>
         </nav>
 
         <div class="sidebar-label secondary-label">系统</div>
         <nav class="nav-list">
-          <button class="nav-item" data-action="settings"><span class="nav-icon">⚙</span><span>设置</span></button>
+          <button class="nav-item" data-action="commands" aria-label="指令设置"><span class="nav-icon">⌘</span><span>指令设置</span></button>
+          <button class="nav-item" data-action="settings" aria-label="设置"><span class="nav-icon">⚙</span><span>设置</span></button>
           <button class="nav-item" data-action="docs"><span class="nav-icon">?</span><span>帮助与文档</span></button>
         </nav>
 
@@ -82,6 +84,13 @@
           <section class="view" id="view-routing"><div class="page-intro"><div><div class="eyebrow">路由规则 <span class="live-pill"><i></i> 实时生效</span></div><h1>决定消息 <em>去哪里。</em></h1><p>为每个机器人绑定一个或多个 AI 会话，也可以一键切换到广播模式。</p></div><button class="primary-button" id="newRouteBtn"><span>＋</span> 新建规则</button></div><div class="routing-layout"><div class="routing-main"><div class="rules-toolbar"><div class="toolbar-title"><strong>全部规则</strong><span id="routeRuleCount">0 条规则</span></div><div class="toolbar-actions"><button class="secondary-button small" id="broadcastAll">广播模式</button></div></div><div class="rule-list" id="ruleList"></div><div id="peerRouteList" class="peer-routes"></div></div><aside class="routing-help"><div class="help-illustration"><span>↗</span><span>◉</span><span>✦</span></div><h3>路由是怎么工作的？</h3><p>每条入站消息会根据机器人、聊天或指令匹配规则，再发送到对应 AI 会话。</p><div class="help-step"><b>01</b><span>机器人收到消息</span></div><div class="help-step"><b>02</b><span>匹配路由规则</span></div><div class="help-step"><b>03</b><span>AI 会话开始回复</span></div></aside></div></section>
 
           <section class="view" id="view-sessions"><div class="page-intro"><div><div class="eyebrow">会话空间 <span class="live-pill"><i></i><span id="sessionsLive">0 个已绑定</span></span></div><h1>你的 AI <em>工作台。</em></h1><p>每一个空间都可以被单独路由，也可以让多个机器人共享。</p></div><button class="primary-button" id="newSessionBtn"><span>＋</span> 添加路由会话</button></div><div class="session-grid large" id="sessionGrid"></div></section>
+
+          <section class="view" id="view-messaging">
+            <div class="page-intro"><div><div class="eyebrow">AI 发消息 <span class="live-pill"><i></i><span id="recipientCount">0 个收件人</span></span></div><h1>让 AI <em>主动联系你。</em></h1><p>给已授权的微信和 Telegram 聊天命名，让 AI 选择指定收件人发送通知或工作结果。</p></div><div class="messaging-toolbar"><button class="secondary-button" id="aiSetupBtn">接入 AI</button><button class="primary-button" id="composeMessageBtn">发送消息</button></div></div>
+            <div class="binding-tip">微信扫码后自动加入本人；Telegram 在私聊中完成 /pair 后加入。开启「AI 发送」才会向 AI 提供此收件人；微信需要先给机器人发送一条消息以取得可用上下文。</div>
+            <div class="recipient-grid" id="recipientGrid"></div>
+            <section class="reply-messaging-panel"><div class="section-heading"><div><h2>原生会话的回复指令发送</h2><p>通过 ClawLink 转发提问时，向开启的会话附带收件人和发送格式，由 AI 在本轮最终回复中选择目标。</p></div></div><div id="replyMessagingList"></div></section>
+          </section>
 
           <section class="view" id="view-activity"><div class="page-intro"><div><div class="eyebrow">活动日志 <span class="live-pill"><i></i> 自动刷新</span></div><h1>每一步操作，<em>都有记录。</em></h1><p>查看机器人连接、路由切换和消息分发的时间线。</p></div><button class="secondary-button" id="exportLog">↓ 导出日志</button></div><div class="log-panel"><div class="log-toolbar"><div class="log-filters"><button class="segment active" data-log-filter="all">全部活动</button><button class="segment" data-log-filter="连接">连接</button><button class="segment" data-log-filter="路由">路由</button><button class="segment" data-log-filter="消息">消息</button></div><div class="date-filter">最近 200 条</div></div><div class="full-activity-list" id="fullActivityList"></div></div></section>
         </div>
