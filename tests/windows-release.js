@@ -40,5 +40,6 @@ test('Windows 安装产物：真实窗口、内置 Node、设置桥接、数据�
   assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, 'state.json'))).sessions[0].name, 'Windows 持久化测试');
   desktop = await electron.launch({ executablePath, env: { ...process.env, CLAWLINK_DATA_DIR: dataDir } });
   const reopened = await desktop.firstWindow(); await reopened.locator('#serviceStatus').filter({ hasText: '本地服务' }).waitFor();
-  await expect(reopened.getByText('Windows 持久化测试', { exact: true })).toBeVisible();
+  await reopened.click('[data-view="sessions"]');
+  await expect(reopened.locator('#sessionGrid').getByRole('heading', { name: 'Windows 持久化测试', exact: true })).toBeVisible();
 });
