@@ -1,0 +1,30 @@
+{
+  "name": "clawbot-router-console",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node server/index.js",
+    "api": "node server/index.js",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "start": "node server/index.js",
+    "test": "node --test tests/*.test.js",
+    "test:ui": "playwright test",
+    "test:ui:production": "CLAWLINK_TEST_PUBLIC_DIR=dist playwright test",
+    "test:native": "node --test tests/native-ax.js",
+    "release": "node scripts/release.js",
+    "test:release": "node --test tests/release-smoke.js",
+    "native:build": "swiftc native/ClawLinkBridge.swift -o native/ClawLinkBridge -framework Cocoa -framework ApplicationServices",
+    "check": "node --check app.js && node --check server/index.js && node --check server/adapters.js && node --check server/native.js && node --check server/runtime.js && node --check server/cli.js && node --check server/pi.js && node --check server/paseo.js && node --check server/paseo-core.cjs && node --check server/paseo-worker.mjs && node --check scripts/release.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "vite": "^6.1.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

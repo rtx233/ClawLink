@@ -1,0 +1,44 @@
+# Dependencies and generated output
+node_modules/
+dist/
+native/ClawLinkBridge
+playwright-report/
+test-results/
+release/
+
+# Local runtime data, credentials, routes and conversation history
+server/data/
+data/
+backups/
+pi-sessions/
+*.jsonl
+state.json
+secrets.json
+endpoint.json
+service.lock
+*.log
+
+# Local environment, editor and agent settings
+.env
+.env.*
+!.env.example
+.npmrc
+*.local
+*.local.*
+.vscode/
+.idea/
+.codex/
+.claude/
+.pi/
+.paseo/
+.openclaw/
+.clawlink/
+CLAUDE.local.md
+
+# Local signing credentials and macOS metadata
+*.pem
+*.key
+*.p12
+*.pfx
+.DS_Store
+._*

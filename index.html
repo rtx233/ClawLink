@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#102033" />
+    <title>ClawLink · 会话路由中心</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-lockup">
+          <div class="brand-mark"><span></span><span></span><span></span></div>
+          <div>
+            <div class="brand-name">Claw<span>Link</span></div>
+            <div class="brand-caption">BOT ROUTING CENTER</div>
+          </div>
+        </div>
+
+        <div class="workspace-switcher" id="workspaceSwitcher">
+          <div class="workspace-avatar">CL</div>
+          <div class="workspace-copy"><strong>本地工作区</strong><span>个人工作区</span></div>
+
+        </div>
+
+        <div class="sidebar-label">控制台</div>
+        <nav class="nav-list" aria-label="主导航">
+          <button class="nav-item active" data-view="overview" aria-label="总览"><span class="nav-icon">◈</span><span>总览</span></button>
+          <button class="nav-item" data-view="bots" aria-label="机器人"><span class="nav-icon">◌</span><span>机器人</span><span class="nav-count">0</span></button>
+          <button class="nav-item" data-view="routing" aria-label="路由规则"><span class="nav-icon">↗</span><span>路由规则</span></button>
+          <button class="nav-item" data-view="sessions" aria-label="会话空间"><span class="nav-icon">□</span><span>会话空间</span></button>
+          <button class="nav-item" data-view="activity" aria-label="活动日志"><span class="nav-icon">◷</span><span>活动日志</span><span class="nav-count muted">0</span></button>
+        </nav>
+
+        <div class="sidebar-label secondary-label">系统</div>
+        <nav class="nav-list">
+          <button class="nav-item" data-action="settings"><span class="nav-icon">⚙</span><span>设置</span></button>
+          <button class="nav-item" data-action="docs"><span class="nav-icon">?</span><span>帮助与文档</span></button>
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+        <div class="connection-status"><span class="status-dot"></span><span id="serviceStatus">等待本地服务</span></div>
+        <div class="profile-row"><div class="profile-avatar">CL</div><div class="profile-copy"><strong>本机用户</strong><span>管理员</span></div></div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div class="breadcrumb"><span>本地工作区</span><b>/</b><strong id="pageTitle">总览</strong></div>
+          <div class="topbar-actions">
+            <div class="search-box"><span class="search-icon">⌕</span><input id="globalSearch" aria-label="搜索机器人或会话" placeholder="搜索机器人或会话" /><kbd>⌘ K</kbd></div>
+            <button class="icon-button" aria-label="通知" id="notificationBtn">♧</button>
+            <button class="primary-button compact" id="addBotTop" aria-label="添加机器人"><span>＋</span> 添加机器人</button>
+          </div>
+        </header>
+
+        <div class="content-wrap">
+          <section class="view active" id="view-overview">
+            <div class="page-intro"><div><div class="eyebrow">工作区总览 <span class="live-pill"><i></i><span id="overviewLive">等待服务</span></span></div><h1>让每个机器人，<em>找到正确的会话。</em></h1><p>统一管理微信 ClawBot 与 Telegram Bot，把消息精准送到 Codex、Claude、PI、Paseo 等本机 AI 应用的指定会话。</p></div><button class="secondary-button" id="quickGuide"><span>✦</span> 快速开始</button></div>
+
+            <div class="metric-grid">
+              <article class="metric-card accent-orange"><div class="metric-top"><span>已连接机器人</span><span class="metric-icon">◌</span></div><strong id="metricBots">0</strong><div class="metric-foot"><span>平台接收连接在线</span></div></article>
+              <article class="metric-card accent-blue"><div class="metric-top"><span>活跃路由</span><span class="metric-icon">↗</span></div><strong id="metricRoutes">0</strong><div class="metric-foot"><span>当前启用的规则</span></div></article>
+              <article class="metric-card accent-green"><div class="metric-top"><span>今日消息</span><span class="metric-icon">✦</span></div><strong id="metricMessages">0</strong><div class="metric-foot"><span>已授权聊天的入站消息</span></div></article>
+              <article class="metric-card accent-purple"><div class="metric-top"><span>平均响应</span><span class="metric-icon">◷</span></div><strong id="metricLatency">—</strong><div class="metric-foot"><span>从收到消息到回复发出</span></div></article>
+            </div>
+
+            <div class="section-heading"><div><h2>路由概览</h2><p>最近活跃的机器人与目标会话</p></div><button class="text-button" data-view-target="routing">查看全部 <span>→</span></button></div>
+            <div class="route-overview-grid">
+              <div class="table-panel">
+                <div class="table-toolbar"><div class="segmented"><button class="segment active" data-filter="all">全部 <span>0</span></button><button class="segment" data-filter="wechat">微信 <span>0</span></button><button class="segment" data-filter="telegram">Telegram <span>0</span></button></div><button class="icon-button subtle" id="refreshRoutes" aria-label="刷新路由">↻</button></div>
+                <div class="route-table-wrap"><table class="route-table"><thead><tr><th>机器人</th><th>平台</th><th>当前路由</th><th>状态</th><th></th></tr></thead><tbody id="routeTableBody"></tbody></table></div>
+              </div>
+              <aside class="command-panel"><div class="panel-kicker"><span class="panel-signal"></span> 指令速览</div><h3>从聊天窗口<br /><span>直接切换会话</span></h3><p>不需要打开控制台，给机器人发送指令即可完成切换。</p><div class="command-list"><div class="command-row"><code>/route</code><span>查看当前路由</span></div><div class="command-row"><code>/switch</code><span>切换到指定会话</span></div><div class="command-row"><code>/broadcast</code><span>发送到全部会话</span></div></div><button class="outline-button full" id="viewCommands">查看全部指令 <span>→</span></button></aside>
+            </div>
+
+            <div class="bottom-grid"><section class="activity-panel"><div class="section-heading compact-heading"><div><h2>最近活动</h2><p>机器人和路由的最新动态</p></div><button class="text-button" data-view-target="activity">查看日志 <span>→</span></button></div><div class="activity-list" id="activityList"></div></section><section class="sessions-panel"><div class="section-heading compact-heading"><div><h2>会话空间</h2><p>可被路由的 AI 目标</p></div><button class="text-button" data-view-target="sessions">管理 <span>→</span></button></div><div class="session-stack" id="sessionStack"></div></section></div>
+          </section>
+
+          <section class="view" id="view-bots"><div class="page-intro"><div><div class="eyebrow">机器人 <span class="live-pill"><i></i><span id="botsLive">0 个在线</span></span></div><h1>管理你的 <em>Bot 网络。</em></h1><p>扫码接入 OpenClaw 微信，或使用 Token 接入 Telegram Bot，统一查看连接状态与路由。</p></div><button class="primary-button" id="addBotFromView"><span>＋</span> 添加机器人</button></div><div class="bot-grid" id="botGrid"></div></section>
+
+          <section class="view" id="view-routing"><div class="page-intro"><div><div class="eyebrow">路由规则 <span class="live-pill"><i></i> 实时生效</span></div><h1>决定消息 <em>去哪里。</em></h1><p>为每个机器人绑定一个或多个 AI 会话，也可以一键切换到广播模式。</p></div><button class="primary-button" id="newRouteBtn"><span>＋</span> 新建规则</button></div><div class="routing-layout"><div class="routing-main"><div class="rules-toolbar"><div class="toolbar-title"><strong>全部规则</strong><span id="routeRuleCount">0 条规则</span></div><div class="toolbar-actions"><button class="secondary-button small" id="broadcastAll">广播模式</button></div></div><div class="rule-list" id="ruleList"></div><div id="peerRouteList" class="peer-routes"></div></div><aside class="routing-help"><div class="help-illustration"><span>↗</span><span>◉</span><span>✦</span></div><h3>路由是怎么工作的？</h3><p>每条入站消息会根据机器人、聊天或指令匹配规则，再发送到对应 AI 会话。</p><div class="help-step"><b>01</b><span>机器人收到消息</span></div><div class="help-step"><b>02</b><span>匹配路由规则</span></div><div class="help-step"><b>03</b><span>AI 会话开始回复</span></div></aside></div></section>
+
+          <section class="view" id="view-sessions"><div class="page-intro"><div><div class="eyebrow">会话空间 <span class="live-pill"><i></i><span id="sessionsLive">0 个已绑定</span></span></div><h1>你的 AI <em>工作台。</em></h1><p>每一个空间都可以被单独路由，也可以让多个机器人共享。</p></div><button class="primary-button" id="newSessionBtn"><span>＋</span> 添加路由会话</button></div><div class="session-grid large" id="sessionGrid"></div></section>
+
+          <section class="view" id="view-activity"><div class="page-intro"><div><div class="eyebrow">活动日志 <span class="live-pill"><i></i> 自动刷新</span></div><h1>每一步操作，<em>都有记录。</em></h1><p>查看机器人连接、路由切换和消息分发的时间线。</p></div><button class="secondary-button" id="exportLog">↓ 导出日志</button></div><div class="log-panel"><div class="log-toolbar"><div class="log-filters"><button class="segment active" data-log-filter="all">全部活动</button><button class="segment" data-log-filter="连接">连接</button><button class="segment" data-log-filter="路由">路由</button><button class="segment" data-log-filter="消息">消息</button></div><div class="date-filter">最近 200 条</div></div><div class="full-activity-list" id="fullActivityList"></div></div></section>
+        </div>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="modalBackdrop" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><button class="modal-close" id="modalClose" aria-label="关闭">×</button><div id="modalContent"></div></div></div>
+    <div class="toast" id="toast"><span class="toast-mark">✓</span><span id="toastMessage">已完成</span></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
