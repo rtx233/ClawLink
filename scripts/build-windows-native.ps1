@@ -10,8 +10,8 @@ foreach ($assembly in @('UIAutomationClient.dll', 'UIAutomationTypes.dll', 'Wind
 $source = Join-Path $root 'native\windows\ClawLinkBridge.cs'
 $output = Join-Path $root 'native\ClawLinkBridge.exe'
 if ($Fixture) { $source = Join-Path $root 'tests\native\WindowsFixture.cs'; $output = Join-Path $root 'native\ClawLinkFixture.exe' }
-if (!(Test-Path $compiler)) { throw '.NET Framework 4.8 编译器未找到；请在 Windows 10/11 x64 上构建' }
+if (!(Test-Path $compiler)) { throw '.NET Framework 4.8 compiler not found; build on Windows 10/11 x64' }
 $arguments = @('/nologo', '/codepage:65001', '/optimize+', '/platform:x64', '/target:exe', "/out:$output")
 foreach ($reference in $references) { $arguments += "/reference:$reference" }
 & $compiler @arguments $source
-if ($LASTEXITCODE -ne 0) { throw 'Windows 原生连接器编译失败' }
+if ($LASTEXITCODE -ne 0) { throw 'Windows native bridge compilation failed' }
