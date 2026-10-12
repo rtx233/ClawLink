@@ -8,7 +8,7 @@
 
 Windows 与 macOS 共用微信 / Telegram 登录、路由切换、指令编辑、账户权限和 AI 主动发消息代码。Windows 使用 Electron 独立窗口及系统托盘、UI Automation 会话连接器；自带 Node 和 .NET Framework 连接器，无需另装 Node。当前为未签名的测试版本。
 
-GitHub 仓库的 **Actions → Windows build and validation** 在 `main` 更新时自动构建并验证；成功后从该次运行的 **Artifacts → ClawLink-Windows-x64** 下载。`ClawLink-1.1.2-Windows-x64-setup.exe` 为当前用户安装，ZIP 为解压运行版；普通更新安装包会保留 `%APPDATA%\ClawLink` 中的账号和配置。不要把自己的数据目录放进解压目录或上传到仓库。Mac 和 Windows 各自保存配置，不能同时接收同一个微信账号 / TG Token。
+GitHub 仓库的 **Actions → Windows build and validation** 在 `main` 更新时自动构建并验证；成功后从该次运行的 **Artifacts → ClawLink-Windows-x64** 下载。`ClawLink-1.1.3-Windows-x64-setup.exe` 为当前用户安装，ZIP 为解压运行版；普通更新安装包会保留 `%APPDATA%\ClawLink` 中的账号和配置。不要把自己的数据目录放进解压目录或上传到仓库。Mac 和 Windows 各自保存配置，不能同时接收同一个微信账号 / TG Token。
 
 安装后在「设置」开启「登录 Windows 后自动启动」。关闭窗口后继续在托盘接收消息，通过托盘「退出并停止机器人」结束服务。解压版开启自启后应保持 exe 路径不变。启动权限只用于当前用户，不需要管理员权限。截图截取主屏幕，只需开启账户截图权限；没有 macOS 的屏幕录制授权步骤，锁屏 / 无交互桌面时拒绝截图。
 
@@ -18,7 +18,7 @@ PI 支持 Windows npm 安装入口，或者用 `PI_CLI_PATH` 指定 `cli.js` 完
 
 ### macOS Apple Silicon
 
-`release/ClawLink-1.1.2-macOS-arm64.zip` 是 macOS 13.5+、Apple Silicon 的本地测试安装包。解压后将 `.app` 拖到「应用程序」并打开。安装包自带 Node、连接器和界面，无需安装开发工具；控制台直接显示在 ClawLink 的独立 App 窗口中，Dock 和菜单栏均有入口。关闭窗口后继续接收机器人消息；菜单栏或 Cmd+Q 退出时停止服务。
+`release/ClawLink-1.1.3-macOS-arm64.zip` 是 macOS 13.5+、Apple Silicon 的本地测试安装包。解压后将 `.app` 拖到「应用程序」并打开。安装包自带 Node、连接器和界面，无需安装开发工具；控制台直接显示在 ClawLink 的独立 App 窗口中，Dock 和菜单栏均有入口。关闭窗口后继续接收机器人消息；菜单栏或 Cmd+Q 退出时停止服务。
 
 在 App 的「设置」中开启「登录 Mac 后自动启动 ClawLink」。如系统要求批准，点击「打开系统登录项」，允许 ClawLink；界面按系统实际注册状态显示，不会默认开启自启。它在用户登录后运行，电脑仍需保持登录、联网。
 
@@ -47,7 +47,7 @@ npm start
 5. **辅助功能只用于原生窗口绑定**。检查显示「已允许」就无需重复授权。未允许时点击「请求系统授权」，在系统设置 → 隐私与安全性 → 辅助功能中允许发起操作的进程。源码模式可能显示启动服务的 Codex / 终端或 `ClawLinkBridge`，不一定存在名为 ClawLink 的项目；安装包模式可添加 ClawLink.app。界面显示桥接进程路径，可在“+”文件选择器用 Cmd+Shift+G 定位，最终以重新检查结果为准。PI / Paseo 会话适配器无需辅助功能。
 6. 添加微信机器人，使用微信扫描腾讯 iLink / OpenClaw 返回的二维码。如手机显示数字，在前端输入验证码。Telegram 使用 @BotFather 的 Bot Token，**不使用二维码登录**。一个账号 / Token 只应由一个服务接收消息。
 7. **微信扫码确认后自动授权扫码账号，无需 `/pair`**；已登录的旧微信账号也会自动兼容。Telegram 需在 Bot **私聊**中发送控制台提供的 `/pair 配对码`，授权此聊天。配对码使用后失效；可在机器人管理中生成新码。Telegram 群聊可手工填写群 ID（通常为负数），群内允许的成员共享该群路由。
-8. 给机器人发普通文字，会自动转发到机器人当前默认会话。创建机器人时可以选择默认会话；如果当时还没有选择，ClawLink 会使用第一个已绑定会话，因此不需要每次先发切换指令。不同机器人可以选不同会话，也可以共享；前端「切换到此会话」或机器人 `/switch 会话名` 只在需要更换目标时使用。会话菜单可手工发送测试消息确认完整回复。
+8. 给机器人发普通文字，会自动转发到机器人当前默认会话。创建机器人时可以选择默认会话；如果当时还没有选择，ClawLink 会使用唯一启用的自定义路由目标，或在没有自定义路由时使用第一个已绑定会话，因此不需要每次先发切换指令。存在多个自定义路由且没有默认目标时，先用前端「切换到此会话」或机器人 `/switch 会话名` 选择目标。成功转发后默认会在原聊天附带目标提示，可在「账户权限」关闭。会话菜单可手工发送测试消息确认完整回复。
 
 ## 外观与语言设置
 
@@ -91,6 +91,7 @@ npm start
 在「机器人 → 管理 → 账户权限」分别设置每个微信 / Telegram 账户：
 
 - **向 AI 发消息**：控制普通文字和自定义路由是否转发给 AI。
+- **转发成功提示**：默认开启；转发成功后在原微信 / Telegram 聊天附带目标会话名称，可单独关闭。
 - **接收 AI 主动消息**：控制 AI 工具、回复中的发送指令和控制台通知能否发往此账户。还需开启目标收件人的「AI 发送」；普通提问的回复和机器人指令结果继续回传。
 - **允许截图**：默认关闭。开启后仍需允许截图这条指令，并在 App「设置」中请求 macOS 屏幕录制权限。
 - **可用指令**：逐条控制内置及自定义路由指令；改名后保留原权限。帮助自动隐藏禁用指令。
@@ -169,9 +170,9 @@ Windows CI 使用干净 checkout 构建，两个平台使用相同服务文件�
 如具备 Developer ID，构建时设置 `CLAWLINK_SIGN_IDENTITY` 为证书名称。随后使用自己的 Apple 公证配置提交 ZIP：
 
 ```bash
-xcrun notarytool submit release/ClawLink-1.1.2-macOS-arm64.zip --keychain-profile YOUR_PROFILE --wait
-xcrun stapler staple release/ClawLink-1.1.2-arm64.app
-spctl --assess --type execute --verbose release/ClawLink-1.1.2-arm64.app
+xcrun notarytool submit release/ClawLink-1.1.3-macOS-arm64.zip --keychain-profile YOUR_PROFILE --wait
+xcrun stapler staple release/ClawLink-1.1.3-arm64.app
+spctl --assess --type execute --verbose release/ClawLink-1.1.3-arm64.app
 ```
 
 公证成功、staple 与系统评估均通过后，再重新压缩已 staple 的 `.app` 并生成新校验和。构建产生的 manifest 默认记录 `notarized: false`；只有实际公证通过后才应更新发行记录。

@@ -194,5 +194,5 @@ test('开启原生回复指令后带入本轮目标，严格执行最终指令�
   assert.equal(revoked.data.ok, false); assert.equal(f.sent.length, before);
   await f.request(`/api/sessions/${session.id}`, { aiMessaging: false }, 'PATCH');
   f.native.send = async (binding, message) => { assert.equal(message, '普通问题'); return '普通回复'; };
-  assert.equal((await f.request('/api/commands', { botId: tg.id, peerId: '101', text: '普通问题' })).data.reply, '普通回复');
+  assert.equal((await f.request('/api/commands', { botId: tg.id, peerId: '101', text: '普通问题' })).data.reply, '已转发到「任务会话」。\n\n普通回复');
 });

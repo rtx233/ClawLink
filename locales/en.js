@@ -260,6 +260,8 @@ export default {
   '可用指令': 'Available commands',
   '向 AI 发消息': 'Send messages to AI',
   '允许把普通消息及路由指令转发到 AI': 'Forward ordinary messages and route commands to AI',
+  '转发成功提示': 'Forwarding success notice',
+  '转发成功后在原聊天发送目标会话提示': 'Send a destination notice in the original chat after forwarding succeeds',
   '接收 AI 主动消息': 'Receive proactive AI messages',
   '允许 AI 工具和控制台向该账户发送通知': 'Allow AI tools and the console to notify this account',
   '允许截图': 'Allow screenshots',

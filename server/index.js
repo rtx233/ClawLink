@@ -196,10 +196,14 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     const ownRoute = state.peerRoutes[key] || {};
     const route = { ...(state.peerRoutes[defaultKey] || {}), ...ownRoute };
     const botRules = state.routes.filter(rule => rule.bot === bot.id);
-    // Bots without an explicit target use the first bound session. This keeps
-    // ordinary messages usable after setup; /switch still changes the target.
+    const fallback = botRules.find(rule => rule.on && rule.command === '默认');
+    const customRules = botRules.filter(rule => rule.on && rule.command !== '默认');
+    // A single custom route is an unambiguous default, so ordinary messages
+    // can omit its trigger. Multiple custom routes still require a switch or
+    // an explicit route command to avoid silently choosing the wrong session.
+    const implicitCustomTarget = !route.target && !bot.target && !fallback && customRules.length === 1 ? customRules[0].target : '';
     const firstBound = state.sessions.find(session => session.binding);
-    const target = route.target || bot.target || firstBound?.id || '';
+    const target = route.target || bot.target || fallback?.target || implicitCustomTarget || (!customRules.length ? firstBound?.id : '') || '';
     const choices = state.sessions.map(session => `${session.name} (${session.id})${session.binding ? '' : ' [未绑定]'}`).join('\n');
     if (['help', 'start'].includes(action)) return { ok: true, reply: commands.help(bot, id => commandAllowed(bot, id)) };
     if (action === 'pair') return { ok: false, reply: bot.platform === 'wechat' ? '微信扫码后已自动授权，无需配对。' : '请在机器人私聊中发送配对指令和配对码。' };
@@ -235,7 +239,6 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     if (route.paused) return { ok: false, reply: `当前路由已暂停，发送 ${commands.get('resume').trigger} 恢复。` };
     const matched = botRules.find(rule => rule.on && rule.command !== '默认' && rule.command === command);
     if (matched && !commandAllowed(bot, `route:${matched.id}`)) return { ok: false, reply: '此账户未获准使用这条路由指令。' };
-    const fallback = botRules.find(rule => rule.on && rule.command === '默认');
     const broadcast = route.broadcastNext && !command.startsWith('/');
     const destinationId = broadcast ? 'all' : matched?.target || target || fallback?.target;
     if (command.startsWith('/') && !matched) return { ok: false, reply: `未知指令，发送 ${commands.get('help').trigger} 查看指令。` };
@@ -250,19 +253,32 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     const destinations = destinationId === 'all' ? state.sessions.filter(x => x.binding) : [requireSession(destinationId)];
     if (!destinations.length) return { ok: false, reply: '没有已绑定的会话。' };
     const replies = [];
+    const forwarded = [];
     for (const session of destinations) {
       if (!permissionsFor(bot).forwardMessages || peerId && (!bot.enabled || !secrets[bot.id]?.allowedPeers?.includes(peerId))) { replies.push({ name: session.name, ok: false, text: '账户权限已变更，已停止转发。' }); break; }
       try {
         if (!session.binding) throw new Error('会话未绑定目标');
         const context = messaging.preparePrompt(session, message);
         const reply = await targetAdapter(session.binding).send(session.binding, context.message);
+        forwarded.push(session.name);
         const processed = peerId && (!bot.enabled || !secrets[bot.id]?.allowedPeers?.includes(peerId) || !permissionsFor(bot).forwardMessages) ? { ok: false, text: '账户权限已变更，未执行回复中的发送指令。' } : await messaging.handleReply(session, reply, context);
         session.status = 'verified'; session.lastVerifiedAt = new Date().toISOString(); delete session.error;
         replies.push({ name: session.name, ok: processed.ok, text: processed.text });
       } catch (error) { session.status = 'error'; session.error = error.message; replies.push({ name: session.name, ok: false, text: `发送失败：${error.message}` }); }
       save();
     }
-    return { ok: replies.every(x => x.ok), destination: destinations.map(x => x.name).join('、'), reply: replies.length === 1 ? replies[0].text : replies.map(x => `【${x.name}】\n${x.text}`).join('\n\n') };
+    const forwardedNotice = forwarded.length && permissionsFor(bot).forwardNotice
+      ? `已转发到「${forwarded.join('」、「')}」。`
+      : '';
+    return {
+      ok: replies.every(x => x.ok),
+      destination: destinations.map(x => x.name).join('、'),
+      forwardedNotice,
+      reply: [
+        forwardedNotice,
+        replies.length === 1 ? replies[0].text : replies.map(x => `【${x.name}】\n${x.text}`).join('\n\n')
+      ].filter(Boolean).join('\n\n')
+    };
   }
   async function startLogin(bot) {
     if (bot.platform !== 'wechat') throw new HttpError('Telegram 请使用 BotFather Token');

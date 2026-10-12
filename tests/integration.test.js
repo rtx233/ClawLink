@@ -159,7 +159,7 @@ test('多机器人共享会话、聊天独立切换、精准指令及单次广�
   await f.request(`/api/bots/${bot.id}`, { allowedPeers: ['100', '200'] }, 'PATCH');
   const command = (text, peerId = '100') => f.request('/api/commands', { botId: bot.id, peerId, text });
   assert.equal((await command('/switch 编程')).data.ok, true);
-  assert.equal((await command('你好')).data.reply, 'AI 回复：你好');
+  assert.match((await command('你好')).data.reply, /已转发到「编程」。\n\nAI 回复：你好/);
   assert.equal(f.nativeCalls.at(-1).binding.bundleId, 'com.anthropic.claudefordesktop');
   await command('其他人', '200'); assert.equal(f.nativeCalls.at(-1).binding.bundleId, 'com.openai.chat');
   assert.equal((await command('/switch 未知')).data.ok, false);
@@ -192,6 +192,19 @@ test('机器人未预先设置默认会话时，普通消息自动使用第一�
   assert.equal(f.nativeCalls.at(-1).binding.windowTitle, session.binding.windowTitle);
 });
 
+test('唯一自定义路由可作为普通消息默认目标，多个自定义路由要求先切换', async t => {
+  const f = await fixture(); t.after(() => f.close());
+  const first = await f.session('第一个'); const second = await f.session('第二个', 'Claude');
+  const bot = (await f.request('/api/bots', { platform: 'telegram', name: '路由 TG', token: TOKEN })).data.bot;
+  await f.request(`/api/bots/${bot.id}`, { allowedPeers: ['100'] }, 'PATCH');
+  await f.request('/api/routes', { bot: bot.id, command: '/1', target: second.id });
+  const ordinary = await f.request('/api/commands', { botId: bot.id, peerId: '100', text: '直接转发' });
+  assert.equal(ordinary.data.ok, true); assert.equal(f.nativeCalls.at(-1).binding.windowTitle, 'Claude');
+  await f.request('/api/routes', { bot: bot.id, command: '/2', target: first.id });
+  const ambiguous = await f.request('/api/commands', { botId: bot.id, peerId: '100', text: '需要先切换' });
+  assert.equal(ambiguous.data.ok, false); assert.match(ambiguous.data.reply, /未配置可用路由/);
+});
+
 test('Codex、Paseo 和自定义 Bundle ID 可以作为原生路由目标', async t => {
   const f = await fixture(); t.after(() => f.close());
   for (const [name, provider, bundleId] of [['Codex 对话', 'Codex', 'com.openai.codex'], ['Paseo 对话', 'Paseo', 'sh.paseo.desktop'], ['其它应用', '自定义客户端', 'com.example.client']]) {
@@ -221,7 +234,7 @@ test('入站微信完整链路：扫码授权本人、忽略陌生人、/switch�
   await f.app.receive(internal, event(`/switch ${s.name}`));
   await f.app.receive(internal, event('你好微信'));
   assert.equal(f.nativeCalls.at(-1).text, '你好微信');
-  assert.equal(f.sent.at(-1).text, 'AI 回复：你好微信');
+  assert.match(f.sent.at(-1).text, /已转发到「研究室」。\n\nAI 回复：你好微信/);
   assert.equal(f.sent.at(-1).contextToken, 'context-1');
   assert.equal(f.app.viewState().recipients.find(item => item.botId === bot.id).ready, true);
   const wxSend = f.calls.find(x => x.path.endsWith('sendmessage'));
@@ -238,7 +251,7 @@ test('Telegram 长轮询接收、去重、回复及停止恢复', async t => {
   assert.equal(f.nativeCalls.length, 0); assert.equal(f.sent.length, 0);
   const update = (id, text) => ({ update_id: id, message: { chat: { id: 42, type: 'private' }, from: { id: 42 }, date: Math.floor(Date.now() / 1000), text } });
   f.tgUpdates.push(update(1, `/pair ${bot.pairingCode}`), update(2, '真实入站'));
-  await until(() => f.sent.some(x => x.text === 'AI 回复：真实入站'));
+  await until(() => f.sent.some(x => x.text.includes('AI 回复：真实入站')));
   assert.equal(f.nativeCalls.length, 1);
   f.tgUpdates.push(update(2, '真实入站')); await until(() => f.tgUpdates.length === 0);
   assert.equal(f.nativeCalls.length, 1);
@@ -261,6 +274,7 @@ test('错误会话或失效绑定拒绝发送，并将失败返回机器人', as
   f.setNativeFailure('当前会话与绑定标识不符');
   await f.app.receive(f.app.viewState().bots[0], { peerId: '42', text: '不能发错', id: '3' });
   assert.equal(f.nativeCalls.length, 0); assert.match(f.sent.at(-1).text, /当前会话与绑定标识不符/);
+  assert.ok(!f.sent.at(-1).text.includes('已转发到'));
   assert.equal((await f.request('/api/state')).data.sessions[0].status, 'error');
 });
 

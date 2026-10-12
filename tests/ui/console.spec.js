@@ -185,11 +185,12 @@ test('账户权限分别保存，帮助隐藏禁用指令，系统截图权限�
   const state = await (await page.request.get('/api/state')).json(); const tg = state.bots.find(bot => bot.platform === 'telegram');
   await page.locator(`#botGrid [data-bot-menu="${tg.id}"]`).click(); await page.click(`[data-bot-permissions="${tg.id}"]`);
   await expect(page.locator('#permission-screenshot')).not.toBeChecked();
-  await page.uncheck('#permission-forwardMessages'); await page.uncheck('#permission-sendMessages');
+  await expect(page.locator('#permission-forwardNotice')).toBeChecked();
+  await page.uncheck('#permission-forwardMessages'); await page.uncheck('#permission-forwardNotice'); await page.uncheck('#permission-sendMessages');
   await page.check('#permission-screenshot'); await page.uncheck('[data-command-permission="switch"]');
   await page.click('#savePermissions'); await expect(page.locator('#modalBackdrop')).not.toHaveClass(/open/);
   const saved = (await (await page.request.get('/api/state')).json()).bots.find(bot => bot.id === tg.id);
-  expect(saved.permissions).toMatchObject({ screenshot: true, forwardMessages: false, sendMessages: false, commands: { switch: false } });
+  expect(saved.permissions).toMatchObject({ screenshot: true, forwardMessages: false, forwardNotice: false, sendMessages: false, commands: { switch: false } });
   await page.click('[data-action="commands"]'); await page.selectOption('#helpPreviewBot', tg.id);
   await expect(page.locator('#helpPreview')).not.toContainText('[愉快]'); await expect(page.locator('#helpPreview')).toContainText('/screenshot');
   await page.keyboard.press('Escape'); await page.click('[data-action="settings"]');

@@ -31,7 +31,7 @@ test('微信 / Telegram 共用 PI、Paseo 和原生目标，跨类型切换并�
     for (const [destination, prefix] of [[pi, 'PI'], [paseo, 'Paseo'], [native, 'AI']]) {
       await f.app.receive(live, event(`/switch ${destination.name}`));
       await f.app.receive(live, event(`测试 ${platform}`));
-      assert.equal(f.sent.at(-1).text, `${prefix} 回复：测试 ${platform}`);
+      assert.equal(f.sent.at(-1).text, `已转发到「${destination.name}」。\n\n${prefix} 回复：测试 ${platform}`);
     }
     const broadcast = await f.request('/api/commands', { botId: bot.id, text: '/broadcast' }); assert.equal(broadcast.data.ok, true);
     const result = await f.request('/api/commands', { botId: bot.id, text: '广播' });

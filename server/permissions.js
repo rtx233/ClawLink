@@ -1,4 +1,4 @@
-const defaults = () => ({ forwardMessages: true, sendMessages: true, screenshot: false, commands: {} });
+const defaults = () => ({ forwardMessages: true, forwardNotice: true, sendMessages: true, screenshot: false, commands: {} });
 function permissionsFor(bot) { return { ...defaults(), ...bot.permissions, commands: { ...bot.permissions?.commands } }; }
 function commandAllowed(bot, id) {
   const permissions = permissionsFor(bot);
@@ -9,7 +9,7 @@ function patchPermissions(bot, input, validIds) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail('权限必须是对象');
   const next = permissionsFor(bot);
   for (const [key, value] of Object.entries(input)) {
-    if (['forwardMessages', 'sendMessages', 'screenshot'].includes(key)) {
+    if (['forwardMessages', 'forwardNotice', 'sendMessages', 'screenshot'].includes(key)) {
       if (typeof value !== 'boolean') fail('权限开关必须是布尔值'); next[key] = value;
     } else if (key === 'commands') {
       if (!value || typeof value !== 'object' || Array.isArray(value)) fail('指令权限必须是对象');
