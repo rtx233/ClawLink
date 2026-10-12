@@ -1,13 +1,32 @@
 const { test, expect } = require('@playwright/test');
 
+async function expectReadableText(page) {
+  const contrasts = await page.evaluate(() => {
+    const luminance = color => {
+      const rgb = color.match(/[\d.]+/g).slice(0, 3).map(value => Number(value) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+      return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+    };
+    return ['#view-overview h1', '#metricBots', '#view-overview .section-heading h2'].map(selector => {
+      const element = document.querySelector(selector); let background = element;
+      while (getComputedStyle(background).backgroundColor === 'rgba(0, 0, 0, 0)' && background.parentElement) background = background.parentElement;
+      const a = luminance(getComputedStyle(element).color), b = luminance(getComputedStyle(background).backgroundColor);
+      return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+    });
+  });
+  for (const contrast of contrasts) expect(contrast).toBeGreaterThanOrEqual(4.5);
+}
+
 test('明暗主题、系统变化、刷新恢复和移动端设置', async ({ page }) => {
   await page.request.patch('/api/preferences', { data: { theme: 'system' } });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.goto('/'); await expect(page.locator('#serviceStatus')).toContainText('本地服务');
   const root = page.locator('html');
   await expect(root).toHaveAttribute('data-theme', 'light');
+  await expectReadableText(page);
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(root).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#view-overview h1')).toHaveCSS('color', 'rgb(229, 237, 245)');
+  await expectReadableText(page);
   await page.click('[data-action="settings"]');
   await expect(page.locator('#themeSelect')).toHaveValue('system');
   await page.selectOption('#themeSelect', 'light');
@@ -20,6 +39,8 @@ test('明暗主题、系统变化、刷新恢复和移动端设置', async ({ pa
   await page.evaluate(() => localStorage.clear()); await page.reload();
   await expect(page.locator('#serviceStatus')).toContainText('本地服务');
   await expect(root).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#view-overview h1')).toHaveCSS('color', 'rgb(229, 237, 245)');
+  await expectReadableText(page);
   await page.emulateMedia({ colorScheme: 'light' }); await expect(root).toHaveAttribute('data-theme', 'dark');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: '/tmp/clawlink-theme-dark.png', fullPage: true });

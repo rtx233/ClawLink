@@ -28,9 +28,15 @@ async function main() {
     const bundledNode = path.join(resources, 'runtime/node'); copy(process.execPath, bundledNode); fs.chmodSync(bundledNode, 0o755);
     const libraries = execFileSync('otool', ['-L', bundledNode], { encoding: 'utf8' }).split('\n').slice(1).map(x => x.trim().split(' ')[0]).filter(Boolean);
     if (libraries.some(x => !x.startsWith('/System/Library/') && !x.startsWith('/usr/lib/'))) throw new Error('Node 依赖非系统动态库，无法生成独立安装包');
-    const nodeLicense = await fetch(`https://raw.githubusercontent.com/nodejs/node/v${process.versions.node}/LICENSE`, { signal: AbortSignal.timeout(20000) });
-    if (!nodeLicense.ok) throw new Error('无法获取对应 Node 版本的许可证');
-    fs.writeFileSync(path.join(resources, 'runtime/LICENSE'), await nodeLicense.text());
+    let nodeLicenseText;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetch(`https://raw.githubusercontent.com/nodejs/node/v${process.versions.node}/LICENSE`, { signal: AbortSignal.timeout(15000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        nodeLicenseText = await response.text(); break;
+      } catch { if (attempt === 2) throw new Error('无法获取对应 Node 版本的许可证，请检查网络后重试'); }
+    }
+    fs.writeFileSync(path.join(resources, 'runtime/LICENSE'), nodeLicenseText);
     for (const file of documents) copy(path.join(root, file), path.join(resources, file));
     fs.writeFileSync(path.join(resources, 'THIRD_PARTY_NOTICES.txt'), `ClawLink includes Node.js ${process.version} (runtime/LICENSE) and QRCode with its npm dependencies. Each dependency's original LICENSE is included under app/node_modules.\n`);
     const icons = path.join(work, 'ClawLink.iconset'); fs.mkdirSync(icons);

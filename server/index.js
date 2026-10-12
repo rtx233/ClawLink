@@ -30,7 +30,7 @@ const targetTone = bundleId => bundleId === PROVIDERS.Claude ? 'target-claude' :
 const targetLogo = bundleId => bundleId === PROVIDERS.Claude ? 'A' : bundleId === PROVIDERS.Paseo ? 'P' : bundleId === PROVIDERS.Codex ? 'C' : '✦';
 const makeId = prefix => `${prefix}-${crypto.randomUUID().slice(0, 12)}`;
 const clean = (value, limit = 160) => String(value || '').trim().slice(0, limit);
-const initialState = () => ({ version: 2, preferences: { theme: 'system' }, bots: [], sessions: [], routes: [], peerRoutes: {}, activity: [], stats: { day: '', messages: 0, replies: 0, durationMs: 0 } });
+const initialState = () => ({ version: 2, preferences: { theme: 'system', language: 'zh-CN' }, bots: [], sessions: [], routes: [], peerRoutes: {}, activity: [], stats: { day: '', messages: 0, replies: 0, durationMs: 0 } });
 class HttpError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
 function readJson(file, fallback) {
   if (!fs.existsSync(file)) return fallback;
@@ -53,7 +53,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     state = initialState();
   }
   for (const rule of state.routes) rule.id ||= makeId('route');
-  state.preferences = { theme: ['system', 'light', 'dark'].includes(state.preferences?.theme) ? state.preferences.theme : 'system' };
+  state.preferences = { theme: ['system', 'light', 'dark'].includes(state.preferences?.theme) ? state.preferences.theme : 'system', language: state.preferences?.language === 'en' ? 'en' : 'zh-CN' };
   function authorizeWechatOwner(secret) {
     secret.allowedPeers ||= [];
     if (!secret.allowedPeers.includes(secret.ownerId)) secret.allowedPeers.push(secret.ownerId);
@@ -347,9 +347,10 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     if (method === 'GET' && pathname === '/api/targets/paseo') return json(res, 200, await paseo.discover());
     const body = ['POST', 'PATCH', 'DELETE'].includes(method) ? await bodyOf(req) : {};
     if (method === 'PATCH' && pathname === '/api/preferences') {
-      if (Object.keys(body).some(key => key !== 'theme')) throw new HttpError('未知的偏好设置');
-      if (!['system', 'light', 'dark'].includes(body.theme)) throw new HttpError('主题应为 system、light 或 dark');
-      state.preferences = { theme: body.theme }; save();
+      if (!Object.keys(body).length || Object.keys(body).some(key => !['theme', 'language'].includes(key))) throw new HttpError('未知的偏好设置');
+      if ('theme' in body && !['system', 'light', 'dark'].includes(body.theme)) throw new HttpError('主题应为 system、light 或 dark');
+      if ('language' in body && !['zh-CN', 'en'].includes(body.language)) throw new HttpError('语言应为 zh-CN 或 en');
+      state.preferences = { ...state.preferences, ...body }; save();
       return json(res, 200, { preferences: state.preferences });
     }
     if (method === 'PATCH' && pathname === '/api/commands/settings') { commands.update(body.commands); save(); return json(res, 200, { commands: commands.list() }); }
@@ -512,7 +513,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
         return await api(req, res, url);
       }
       // Explicit public assets only: never serve data, credentials, dependencies or source.
-      const files = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css' };
+      const files = { '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/i18n.js': 'i18n.js', '/locales/en.js': 'locales/en.js', '/styles.css': 'styles.css' };
       if (publicDir !== rootDir && /^\/assets\/[\w.-]+\.(js|css|woff2|svg|png)$/.test(url.pathname)) files[url.pathname] = url.pathname.slice(1);
       if (req.method !== 'GET' || !files[url.pathname]) throw new HttpError('文件不存在', 404);
       const file = files[url.pathname]; const ext = path.extname(file);
