@@ -196,7 +196,10 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     const ownRoute = state.peerRoutes[key] || {};
     const route = { ...(state.peerRoutes[defaultKey] || {}), ...ownRoute };
     const botRules = state.routes.filter(rule => rule.bot === bot.id);
-    const target = route.target || bot.target;
+    // Bots without an explicit target use the first bound session. This keeps
+    // ordinary messages usable after setup; /switch still changes the target.
+    const firstBound = state.sessions.find(session => session.binding);
+    const target = route.target || bot.target || firstBound?.id || '';
     const choices = state.sessions.map(session => `${session.name} (${session.id})${session.binding ? '' : ' [未绑定]'}`).join('\n');
     if (['help', 'start'].includes(action)) return { ok: true, reply: commands.help(bot, id => commandAllowed(bot, id)) };
     if (action === 'pair') return { ok: false, reply: bot.platform === 'wechat' ? '微信扫码后已自动授权，无需配对。' : '请在机器人私聊中发送配对指令和配对码。' };
@@ -234,7 +237,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     if (matched && !commandAllowed(bot, `route:${matched.id}`)) return { ok: false, reply: '此账户未获准使用这条路由指令。' };
     const fallback = botRules.find(rule => rule.on && rule.command === '默认');
     const broadcast = route.broadcastNext && !command.startsWith('/');
-    const destinationId = broadcast ? 'all' : matched?.target || route.target || fallback?.target;
+    const destinationId = broadcast ? 'all' : matched?.target || target || fallback?.target;
     if (command.startsWith('/') && !matched) return { ok: false, reply: `未知指令，发送 ${commands.get('help').trigger} 查看指令。` };
     if (!permissionsFor(bot).forwardMessages) return { ok: false, reply: '此账户已关闭向 AI 发消息，可在账户权限中开启。' };
     const message = matched ? argument : text;

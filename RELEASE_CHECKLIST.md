@@ -1,4 +1,4 @@
-# ClawLink 1.1.1 发布验证记录
+# ClawLink 1.1.2 发布验证记录
 
 验证环境：2026-10-12，Apple Silicon arm64，macOS 27.0，Node 24.21.0。安装包声明最低 macOS 13.5；最低系统与其他机器尚未实机验证。
 

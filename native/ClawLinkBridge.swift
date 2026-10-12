@@ -199,14 +199,20 @@ func run(_ request: [String: Any]) throws -> [String: Any] {
         capture.arguments = ["-x", "-m", "-t", "png", file.path]
         capture.standardOutput = FileHandle.nullDevice; capture.standardError = FileHandle.nullDevice
         try capture.run(); capture.waitUntilExit()
-        guard capture.terminationStatus == 0, let image = NSImage(contentsOf: file), image.size.width > 0, image.size.height > 0 else { try fail("无法截取当前主屏幕，请检查屏幕录制权限和电脑锁屏状态") }
-        let scale = min(1, 2560 / max(image.size.width, image.size.height))
-        let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
-        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height), bitsPerSample: 8, samplesPerPixel: 3, hasAlpha: false, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0), let context = NSGraphicsContext(bitmapImageRep: bitmap) else { try fail("无法转换截图") }
-        NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = context
-        image.draw(in: NSRect(origin: .zero, size: size))
-        NSGraphicsContext.restoreGraphicsState()
-        guard let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.82]), data.count <= 10 * 1024 * 1024 else { try fail("截图超过图片大小限制，未发送") }
+        guard capture.terminationStatus == 0, let png = try? Data(contentsOf: file), !png.isEmpty else { try fail("无法截取当前主屏幕，请检查屏幕录制权限和电脑锁屏状态") }
+        // screencapture already produces a valid PNG. Sending it directly avoids
+        // AppKit bitmap conversion failures on displays with fractional scaling.
+        if png.count <= 10 * 1024 * 1024 {
+            return ["base64": png.base64EncodedString(), "mimeType": "image/png"]
+        }
+        // Compress only oversized captures. sips handles Retina dimensions and
+        // color profiles more reliably than a hand-built NSBitmapImageRep.
+        let jpeg = folder.appendingPathComponent("screen.jpg")
+        let convert = Process(); convert.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
+        convert.arguments = ["-s", "format", "jpeg", "-s", "formatOptions", "82", file.path, "--out", jpeg.path]
+        convert.standardOutput = FileHandle.nullDevice; convert.standardError = FileHandle.nullDevice
+        try convert.run(); convert.waitUntilExit()
+        guard convert.terminationStatus == 0, let data = try? Data(contentsOf: jpeg), !data.isEmpty, data.count <= 10 * 1024 * 1024 else { try fail("截图超过图片大小限制，未发送") }
         return ["base64": data.base64EncodedString(), "mimeType": "image/jpeg"]
     }
     if action == "permission" {

@@ -181,6 +181,17 @@ test('多机器人共享会话、聊天独立切换、精准指令及单次广�
   await command('默认广播', '300'); await command('默认单条', '300'); assert.equal(f.nativeCalls.length, global + 3);
 });
 
+test('机器人未预先设置默认会话时，普通消息自动使用第一个已绑定会话', async t => {
+  const f = await fixture(); t.after(() => f.close());
+  const session = await f.session('自动默认');
+  const bot = (await f.request('/api/bots', { platform: 'telegram', name: '自动路由 TG', token: TOKEN })).data.bot;
+  await f.request(`/api/bots/${bot.id}`, { allowedPeers: ['100'] }, 'PATCH');
+  const result = await f.request('/api/commands', { botId: bot.id, peerId: '100', text: '无需切换指令' });
+  assert.equal(result.data.ok, true);
+  assert.equal(f.nativeCalls.at(-1).text, '无需切换指令');
+  assert.equal(f.nativeCalls.at(-1).binding.windowTitle, session.binding.windowTitle);
+});
+
 test('Codex、Paseo 和自定义 Bundle ID 可以作为原生路由目标', async t => {
   const f = await fixture(); t.after(() => f.close());
   for (const [name, provider, bundleId] of [['Codex 对话', 'Codex', 'com.openai.codex'], ['Paseo 对话', 'Paseo', 'sh.paseo.desktop'], ['其它应用', '自定义客户端', 'com.example.client']]) {
