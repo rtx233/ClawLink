@@ -38,7 +38,7 @@ async function main() {
     }
     fs.writeFileSync(path.join(resources, 'runtime/LICENSE'), nodeLicenseText);
     for (const file of documents) copy(path.join(root, file), path.join(resources, file));
-    fs.writeFileSync(path.join(resources, 'THIRD_PARTY_NOTICES.txt'), `ClawLink includes Node.js ${process.version} (runtime/LICENSE) and QRCode with its npm dependencies. Each dependency's original LICENSE is included under app/node_modules.\n`);
+    fs.writeFileSync(path.join(resources, 'THIRD_PARTY_NOTICES.txt'), `ClawLink includes Node.js ${process.version} (runtime/LICENSE) and QRCode, the Feishu Node SDK, Discord.js and their npm dependencies. Each dependency's original LICENSE is included under app/node_modules.\n`);
     const icons = path.join(work, 'ClawLink.iconset'); fs.mkdirSync(icons);
     run('swift', ['scripts/icon.swift', icons]); run('iconutil', ['-c', 'icns', icons, '-o', path.join(resources, 'ClawLink.icns')]);
     fs.writeFileSync(path.join(contents, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>

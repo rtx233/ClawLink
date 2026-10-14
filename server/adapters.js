@@ -1,4 +1,6 @@
 const crypto = require('node:crypto');
+const { createBotPlatforms } = require('./bot-platforms');
+const { streaming } = require('./platforms');
 
 const WECHAT_BASE = 'https://ilinkai.weixin.qq.com';
 const WECHAT_CDN = 'https://novac2c.cdn.weixin.qq.com/c2c';
@@ -28,7 +30,8 @@ function chunks(text, limit) {
   for (let i = 0; i < chars.length; i += limit) result.push(chars.slice(i, i + limit).join(''));
   return result;
 }
-function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramBase = 'https://api.telegram.org', wechatCdn = WECHAT_CDN, allowTestHosts = false } = {}) {
+function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramBase = 'https://api.telegram.org', wechatCdn = WECHAT_CDN, allowTestHosts = false, ...platformOptions } = {}) {
+  const extra = createBotPlatforms({ fetchImpl, allowTestHosts, ...platformOptions });
   const validateBase = value => allowTestHosts ? new URL(value || wechatBase).origin : trustedWechatBase(value || wechatBase);
   async function request(url, options = {}, timeout = 18000, signal) {
     try {
@@ -50,6 +53,9 @@ function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramB
   const tg = (token, method, body = {}, timeout, signal) => request(`${telegramBase}/bot${token}/${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, timeout, signal);
   return {
     validateBase,
+    validate: extra.validate,
+    subscribe: extra.subscribe,
+    close: extra.close,
     async qrStart(tokens = []) {
       const data = await wxPost(wechatBase, 'get_bot_qrcode?bot_type=3', '', { local_token_list: tokens.slice(-10) });
       if (!data.qrcode || !data.qrcode_img_content) throw new Error('微信未返回可用的二维码');
@@ -69,6 +75,7 @@ function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramB
       return me.result;
     },
     async updates(bot, secret, signal) {
+      if (!['wechat', 'telegram'].includes(bot.platform)) throw new Error('此平台使用长连接接收消息');
       if (bot.platform === 'telegram') {
         const data = await tg(secret.token, 'getUpdates', { offset: secret.offset || 0, timeout: 30, allowed_updates: ['message'] }, 38000, signal);
         return { cursor: data.result?.length ? Math.max(...data.result.map(x => x.update_id)) + 1 : secret.offset || 0,
@@ -89,6 +96,8 @@ function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramB
       })) };
     },
     async send(bot, secret, event, text) {
+      if (streaming(bot)) return extra.send(bot, secret, event, text);
+      if (!['wechat', 'telegram'].includes(bot.platform)) throw new Error('不支持此机器人平台');
       if (bot.platform === 'telegram') {
         for (const piece of chunks(text, 3500)) await tg(secret.token, 'sendMessage', { chat_id: event.peerId, text: piece });
       } else {
@@ -107,6 +116,8 @@ function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramB
       const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
       const jpeg = bytes[0] === 255 && bytes[1] === 216;
       if (!png && !jpeg) throw new Error('截图必须为 PNG 或 JPEG 图片');
+      if (streaming(bot)) return extra.sendImage(bot, secret, event, bytes, { canSend });
+      if (!['wechat', 'telegram'].includes(bot.platform)) throw new Error('不支持此机器人平台');
       if (bot.platform === 'telegram') {
         const form = new FormData(); form.append('chat_id', event.peerId);
         form.append('photo', new Blob([bytes], { type: png ? 'image/png' : 'image/jpeg' }), `screenshot.${png ? 'png' : 'jpg'}`);
@@ -142,6 +153,8 @@ function createAdapters({ fetchImpl = fetch, wechatBase = WECHAT_BASE, telegramB
     },
     async sendDirect(bot, secret, peerId, text) {
       if (!peerId) throw new Error('平台未返回可用的设备会话');
+      if (streaming(bot)) return extra.send(bot, secret, { peerId }, text);
+      if (!['wechat', 'telegram'].includes(bot.platform)) throw new Error('不支持此机器人平台');
       if (bot.platform === 'telegram') {
         for (const piece of chunks(text, 3500)) await tg(secret.token, 'sendMessage', { chat_id: peerId, text: piece });
         return;

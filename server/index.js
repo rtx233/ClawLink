@@ -12,6 +12,7 @@ const { acquireLock } = require('./runtime');
 const { createMessaging } = require('./messaging');
 const { createCommands, parse } = require('./commands');
 const { permissionsFor, commandAllowed, patchPermissions } = require('./permissions');
+const { platforms, configured, streaming } = require('./platforms');
 const { version } = require('../package.json');
 
 const rootDir = path.resolve(__dirname, '..');
@@ -90,7 +91,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
   }
   function viewState() {
     if (resetDailyStats()) save();
-    return { ...state, commands: commands.list(), bots: state.bots.map(bot => ({ ...bot, permissions: permissionsFor(bot), configured: !!secrets[bot.id]?.token, pairingCode: secrets[bot.id]?.pairingCode,
+    return { ...state, commands: commands.list(), bots: state.bots.map(bot => ({ ...bot, permissions: permissionsFor(bot), configured: configured(bot, secrets[bot.id]), pairingCode: secrets[bot.id]?.pairingCode,
       peers: secrets[bot.id]?.allowedPeers || [], route: sessionById(bot.target)?.name || '未指定' })),
       sessions: state.sessions.map(session => ({ ...session, users: state.bots.filter(bot => bot.target === session.id).length })),
       recipients: messaging.list(),
@@ -103,6 +104,28 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     stopBot(bot.id); bot.enabled = true; bot.status = 'connecting'; delete bot.error;
     if (!workers) { bot.status = 'online'; save(); return; }
     const control = new AbortController(); polling.set(bot.id, control);
+    const current = () => !closed && !control.signal.aborted && polling.get(bot.id) === control && botById(bot.id) === bot && bot.enabled;
+    if (streaming(bot)) {
+      const secret = secrets[bot.id];
+      try {
+        adapters.subscribe(bot, secret, { signal: control.signal,
+          onMessage: event => {
+            if (!current() || secrets[bot.id] !== secret) return;
+            secret.seen ||= []; if (secret.seen.includes(event.id)) return;
+            secret.seen.push(event.id); secret.seen = secret.seen.slice(-500);
+            save(); enqueueIncoming(bot, event, secret, control.signal);
+          },
+          onStatus: ({ status, error, fatal }) => {
+            if (!current()) return;
+            bot.status = status; if (error) bot.error = error; else delete bot.error;
+            if (status === 'online') bot.lastPollAt = new Date().toISOString();
+            if (fatal) { bot.enabled = false; stopBot(bot.id); }
+            save();
+          }
+        });
+      } catch { if (current()) { bot.status = 'error'; bot.error = '无法启动机器人连接，请检查平台配置'; bot.enabled = false; stopBot(bot.id); save(); } }
+      return;
+    }
     let authFailures = 0;
     (async () => {
       while (!closed && !control.signal.aborted && bot.enabled) {
@@ -119,7 +142,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
             secret.seen ||= [];
             if (secret.seen.includes(event.id)) continue;
             secret.seen.push(event.id); secret.seen = secret.seen.slice(-500);
-            save(); enqueueIncoming(bot, event);
+            save(); enqueueIncoming(bot, event, secret, control.signal);
           }
           if (bot.platform === 'telegram') secret.offset = result.cursor; else secret.cursor = result.cursor;
           save(); await delay(pollDelay, undefined, { signal: control.signal });
@@ -137,21 +160,21 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       if (polling.get(bot.id) === control) polling.delete(bot.id);
     })().catch(() => { bot.status = 'error'; bot.error = '接收循环已停止，请重新连接'; save(); });
   }
-  function enqueueIncoming(bot, event) {
+  function enqueueIncoming(bot, event, secret, signal) {
     const key = peerKey(bot, event.peerId);
     const previous = inboundQueues.get(key) || Promise.resolve();
-    const next = previous.then(() => receive(bot, event)).catch(error => { activity(`${bot.name}：${error.message}`, '消息'); save(); });
+    const next = previous.then(() => { if (!signal?.aborted && (!secret || secrets[bot.id] === secret)) return receive(bot, event, { signal }); }).catch(error => { activity(`${bot.name}：${error.message}`, '消息'); save(); });
     inboundQueues.set(key, next);
     next.finally(() => { if (inboundQueues.get(key) === next) inboundQueues.delete(key); });
   }
-  async function receive(bot, event) {
+  async function receive(bot, event, { signal } = {}) {
     bot = botById(bot.id);
     if (!bot) return;
     const secret = secrets[bot.id];
-    if (!secret || closed || !bot.enabled) return;
+    if (!secret || closed || !bot.enabled || signal?.aborted) return;
     const text = clean(event.text, 20000);
     const { trigger, argument: code } = parse(text);
-    if (commands.match(trigger)?.id === 'pair' && bot.platform === 'telegram') {
+    if (commands.match(trigger)?.id === 'pair' && bot.platform !== 'wechat') {
       if (!commandAllowed(bot, 'pair')) return;
       if (event.group) return;
       if (!secret.pairingCode || code !== secret.pairingCode) return;
@@ -172,21 +195,21 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     state.stats.messages += 1; save();
     const start = Date.now();
     let result;
-    try { result = await commandForBot(bot, text, event.peerId); }
+    try { result = await commandForBot(bot, text, event.peerId, { signal }); }
     catch (error) { result = { ok: false, reply: `处理失败：${error.message}` }; }
     // A platform reply failure must never re-run a native send.
     try {
-      if (closed || !bot.enabled || secrets[bot.id] !== secret || !secret.allowedPeers?.includes(event.peerId)) return;
+      if (closed || signal?.aborted || !bot.enabled || secrets[bot.id] !== secret || !secret.allowedPeers?.includes(event.peerId)) return;
       if (result.image) {
         if (!commandAllowed(bot, 'screenshot')) return;
-        await adapters.sendImage(bot, secret, event, result.image, { canSend: () => !closed && bot.enabled && secrets[bot.id] === secret && secret.allowedPeers?.includes(event.peerId) && commandAllowed(bot, 'screenshot') });
+        await adapters.sendImage(bot, secret, event, result.image, { canSend: () => !closed && !signal?.aborted && bot.enabled && secrets[bot.id] === secret && secret.allowedPeers?.includes(event.peerId) && commandAllowed(bot, 'screenshot') });
       } else await adapters.send(bot, secret, event, result.reply);
     }
     catch { activity(`${bot.name} ${result.image ? '截图' : '回复'}发送失败；请检查平台状态，不会自动重发`, '消息'); save(); return; }
     resetDailyStats(); state.stats.replies += 1; state.stats.durationMs += Date.now() - start;
     activity(`${bot.name} → ${result.destination || '机器人指令'}，已回复聊天 ${event.peerId}`, '消息', result.ok ? 'green' : 'orange'); save();
   }
-  async function commandForBot(bot, input, peerId = '') {
+  async function commandForBot(bot, input, peerId = '', { signal } = {}) {
     const text = clean(input, 20000);
     const { trigger: command, argument } = parse(text);
     const action = commands.match(command)?.id;
@@ -208,7 +231,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     if (['help', 'start'].includes(action)) return { ok: true, reply: commands.help(bot, id => commandAllowed(bot, id)) };
     if (action === 'pair') return { ok: false, reply: bot.platform === 'wechat' ? '微信扫码后已自动授权，无需配对。' : '请在机器人私聊中发送配对指令和配对码。' };
     if (action === 'screenshot') {
-      if (!peerId) return { ok: false, reply: '请从已授权的微信或 Telegram 聊天发送截图指令。' };
+      if (!peerId) return { ok: false, reply: '请从已授权的机器人聊天发送截图指令。' };
       const image = await native.screenshot();
       if (!Buffer.isBuffer(image) || !image.length || image.length > 10 * 1024 * 1024) throw new Error('截图为空或超过 10 MB，未发送');
       return { ok: true, reply: '当前主屏幕截图', image };
@@ -255,13 +278,13 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     const replies = [];
     const forwarded = [];
     for (const session of destinations) {
-      if (!permissionsFor(bot).forwardMessages || peerId && (!bot.enabled || !secrets[bot.id]?.allowedPeers?.includes(peerId))) { replies.push({ name: session.name, ok: false, text: '账户权限已变更，已停止转发。' }); break; }
+      if (signal?.aborted || !permissionsFor(bot).forwardMessages || peerId && (!bot.enabled || !secrets[bot.id]?.allowedPeers?.includes(peerId))) { replies.push({ name: session.name, ok: false, text: '账户权限已变更，已停止转发。' }); break; }
       try {
         if (!session.binding) throw new Error('会话未绑定目标');
         const context = messaging.preparePrompt(session, message);
         const reply = await targetAdapter(session.binding).send(session.binding, context.message);
         forwarded.push(session.name);
-        const processed = peerId && (!bot.enabled || !secrets[bot.id]?.allowedPeers?.includes(peerId) || !permissionsFor(bot).forwardMessages) ? { ok: false, text: '账户权限已变更，未执行回复中的发送指令。' } : await messaging.handleReply(session, reply, context);
+        const processed = signal?.aborted || peerId && (!bot.enabled || !secrets[bot.id]?.allowedPeers?.includes(peerId) || !permissionsFor(bot).forwardMessages) ? { ok: false, text: '账户权限已变更，未执行回复中的发送指令。' } : await messaging.handleReply(session, reply, context);
         session.status = 'verified'; session.lastVerifiedAt = new Date().toISOString(); delete session.error;
         replies.push({ name: session.name, ok: processed.ok, text: processed.text });
       } catch (error) { session.status = 'error'; session.error = error.message; replies.push({ name: session.name, ok: false, text: `发送失败：${error.message}` }); }
@@ -281,7 +304,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     };
   }
   async function startLogin(bot) {
-    if (bot.platform !== 'wechat') throw new HttpError('Telegram 请使用 BotFather Token');
+    if (bot.platform !== 'wechat') throw new HttpError('此平台请使用应用凭据连接');
     if (loginFlights.has(bot.id)) return loginFlights.get(bot.id);
     const task = (async () => {
       stopBot(bot.id); logins.delete(bot.id); bot.enabled = false; bot.status = 'pending'; delete bot.error; save();
@@ -379,31 +402,50 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
     if (method === 'POST' && pathname === '/api/messages/send') return json(res, 200, await messaging.send(body, { ai: false, source: '控制台' }));
     if (method === 'POST' && pathname === '/api/native/permission') return json(res, 200, await native.requestPermission());
     if (method === 'POST' && pathname === '/api/bots') {
-      if (!['wechat', 'telegram'].includes(body.platform)) throw new HttpError('平台应为 wechat 或 telegram');
+      if (!Object.hasOwn(platforms, body.platform)) throw new HttpError('不支持此机器人平台');
       const name = clean(body.name); if (!name) throw new HttpError('请输入机器人名称');
       const target = body.target ? requireSession(body.target).id : '';
-      const bot = { id: makeId(body.platform === 'wechat' ? 'wx' : 'tg'), name, platform: body.platform, handle: '', target, avatar: name[0].toUpperCase(), tone: ['orange', 'blue', 'green', 'violet'][state.bots.length % 4], status: 'pending', enabled: false };
+      const bot = { id: makeId(platforms[body.platform].prefix), name, platform: body.platform, handle: '', target, avatar: name[0].toUpperCase(), tone: ['orange', 'blue', 'green', 'violet'][state.bots.length % 4], status: 'pending', enabled: false };
       let validated;
+      let credentials;
       if (bot.platform === 'telegram') {
         validated = await adapters.telegramValidate(clean(body.token, 250));
         if (state.bots.some(x => x.platform === 'telegram' && x.handle === `@${validated.username}`)) throw new HttpError('此 Telegram 机器人已连接');
         bot.handle = `@${validated.username}`;
+        credentials = { token: clean(body.token, 250), offset: 0 };
+      } else if (streaming(bot)) {
+        validated = await adapters.validate(bot.platform, body);
+        if (state.bots.some(x => x.platform === bot.platform && x.platformIdentity === validated.identity)) throw new HttpError('此机器人已连接，请使用已有机器人');
+        bot.handle = validated.handle; bot.platformIdentity = validated.identity; credentials = validated.credentials;
       }
-      secrets[bot.id] = { allowedPeers: [], ...(validated ? { pairingCode: crypto.randomBytes(5).toString('hex'), token: clean(body.token, 250), offset: 0, seen: [] } : {}) };
+      secrets[bot.id] = { allowedPeers: [], ...(validated ? { pairingCode: crypto.randomBytes(5).toString('hex'), ...credentials, seen: [] } : {}) };
       state.bots.push(bot); if (target) state.routes.push({ id: makeId('route'), bot: bot.id, command: '默认', target, on: true });
       activity(`创建机器人 ${name}`, '连接'); if (validated) connectBot(bot); save();
       return json(res, 201, { bot: viewState().bots.find(x => x.id === bot.id) });
     }
-    const botMatch = pathname.match(/^\/api\/bots\/([^/]+)(?:\/(login\/start|login\/poll|start|stop|pairing|telegram))?$/);
+    const botMatch = pathname.match(/^\/api\/bots\/([^/]+)(?:\/(login\/start|login\/poll|start|stop|pairing|telegram|credentials))?$/);
     if (botMatch) {
       const bot = requireBot(decodeURIComponent(botMatch[1])); const action = botMatch[2];
       if (method === 'POST' && action === 'login/start') return json(res, 200, await startLogin(bot));
       if (method === 'POST' && action === 'login/poll') return json(res, 200, await pollLogin(bot, body));
-      if (method === 'POST' && action === 'start') { if (!secrets[bot.id]?.token) throw new HttpError('尚未完成登录'); connectBot(bot); save(); return json(res, 200, { ok: true }); }
+      if (method === 'POST' && action === 'start') { if (!configured(bot, secrets[bot.id])) throw new HttpError('尚未完成登录'); connectBot(bot); save(); return json(res, 200, { ok: true }); }
       if (method === 'POST' && action === 'stop') { stopBot(bot.id); bot.enabled = false; bot.status = 'stopped'; save(); return json(res, 200, { ok: true }); }
       if (method === 'POST' && action === 'pairing') {
-        if (bot.platform !== 'telegram') throw new HttpError('微信扫码后自动授权本人，无需配对码');
+        if (bot.platform === 'wechat') throw new HttpError('微信扫码后自动授权本人，无需配对码');
         secrets[bot.id].pairingCode = crypto.randomBytes(5).toString('hex'); save(); return json(res, 200, { code: secrets[bot.id].pairingCode });
+      }
+      if (method === 'POST' && action === 'credentials') {
+        if (!streaming(bot)) throw new HttpError('此平台请使用原有登录方式');
+        const validated = await adapters.validate(bot.platform, body);
+        // Credential verification may finish after the user removes this bot.
+        if (botById(bot.id) !== bot || closed) throw new HttpError('机器人已移除', 409);
+        if (state.bots.some(x => x.id !== bot.id && x.platform === bot.platform && x.platformIdentity === validated.identity)) throw new HttpError('此机器人已连接，请使用已有机器人');
+        const sameIdentity = bot.platformIdentity === validated.identity;
+        stopBot(bot.id);
+        secrets[bot.id] = { ...(sameIdentity ? secrets[bot.id] : { allowedPeers: [], pairingCode: crypto.randomBytes(5).toString('hex'), seen: [] }), ...validated.credentials };
+        if (!sameIdentity) for (const key of Object.keys(state.peerRoutes)) if (JSON.parse(key)[0] === bot.id) delete state.peerRoutes[key];
+        bot.handle = validated.handle; bot.platformIdentity = validated.identity;
+        messaging.syncRecipients(); connectBot(bot); save(); return json(res, 200, { ok: true, authorizationReset: !sameIdentity });
       }
       if (method === 'POST' && action === 'telegram') {
         if (bot.platform !== 'telegram') throw new HttpError('不是 Telegram 机器人');
@@ -424,7 +466,7 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
       if (peerId && !secrets[bot.id]?.allowedPeers?.includes(peerId)) throw new HttpError('此聊天尚未授权');
       if (body.action && !['switch', 'broadcast', 'pause', 'resume'].includes(body.action)) throw new HttpError('控制台操作无效');
       const text = body.action ? `${commands.get(body.action).trigger} ${clean(body.argument)}` : body.text;
-      if (commands.match(parse(text).trigger)?.id === 'screenshot') throw new HttpError('请在授权的微信或 Telegram 聊天中发送截图指令');
+      if (commands.match(parse(text).trigger)?.id === 'screenshot') throw new HttpError('请在授权的机器人聊天中发送截图指令');
       return json(res, 200, await commandForBot(bot, text, peerId));
     }
     if (method === 'POST' && pathname === '/api/sessions') {
@@ -543,13 +585,13 @@ function createApp({ dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirn
   });
   const aiEndpointFile = path.join(dataDir, 'ai-endpoint.json');
   server.on('listening', () => writeJson(aiEndpointFile, { url: `http://127.0.0.1:${server.address().port}`, token: messaging.token }));
-  // Online means a poll actually succeeded, never just that a credential exists.
+  // Online requires a successful poll or stream handshake, never just credentials.
   for (const bot of state.bots) {
-    if (secrets[bot.id]?.token && bot.enabled) connectBot(bot);
-    else bot.status = secrets[bot.id]?.token ? 'stopped' : 'pending';
+    if (configured(bot, secrets[bot.id]) && bot.enabled) connectBot(bot);
+    else bot.status = configured(bot, secrets[bot.id]) ? 'stopped' : 'pending';
   }
   save();
-  return { server, viewState, commandForBot, receive, async close() { closed = true; messaging.close(); for (const id of polling.keys()) stopBot(id); native.close?.(); pi.close?.(); paseo.close?.(); save(); if (server.listening) await new Promise(resolve => server.close(resolve)); if (fs.existsSync(aiEndpointFile)) fs.unlinkSync(aiEndpointFile); } };
+  return { server, viewState, commandForBot, receive, async close() { closed = true; messaging.close(); for (const id of polling.keys()) stopBot(id); adapters.close?.(); native.close?.(); pi.close?.(); paseo.close?.(); save(); if (server.listening) await new Promise(resolve => server.close(resolve)); if (fs.existsSync(aiEndpointFile)) fs.unlinkSync(aiEndpointFile); } };
 }
 if (require.main === module) {
   const dataDir = process.env.CLAWLINK_DATA_DIR || path.join(__dirname, 'data');

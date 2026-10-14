@@ -5,15 +5,39 @@ const path = require('node:path');
 const { createApp } = require('../server');
 const { createAdapters } = require('../server/adapters');
 const { setTimeout: delay } = require('node:timers/promises');
+const { EventEmitter } = require('node:events');
 const TOKEN = '123456:abcdefghijklmnopqrstuvwxyz0123456789';
-async function fixture({ workers = false, port = 0, publicDir } = {}) {
+const FEISHU = { appId: 'cli_1234567890abcdef', appSecret: 'feishu-private-test-secret' };
+const DISCORD_TOKEN = 'discord-private-test-token-first-account';
+async function fixture({ workers = false, port = 0, publicDir, adapterOptions = {} } = {}) {
   const calls = [], sent = [], screenshotCalls = [], tgUpdates = [], wxUpdates = [], nativeCalls = [], piCalls = [], paseoCalls = [];
-  let qrStatus = 'confirmed', qrOwner = 'wx-owner', qrFailure = false, webhook = '', nativeFailure = '', updateFailure = 0, sendFailure = false;
+  let qrStatus = 'confirmed', qrOwner = 'wx-owner', qrFailure = false, webhook = '', nativeFailure = '', updateFailure = 0, sendFailure = false, platformFailure = 0;
+  const streams = [];
+  const feishuSocket = options => {
+    const stream = { platform: 'feishu', options, closed: false, start({ eventDispatcher }) { this.dispatcher = eventDispatcher; return Promise.resolve(); }, close() { this.closed = true; } };
+    streams.push(stream); return stream;
+  };
+  const discordClient = options => {
+    const stream = new EventEmitter(); Object.assign(stream, { platform: 'discord', options, closed: false, login(token) { this.token = token; return Promise.resolve(); }, destroy() { this.closed = true; return Promise.resolve(); } });
+    streams.push(stream); return stream;
+  };
   const upstream = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://local');
     const buffers = []; for await (const chunk of req) buffers.push(chunk);
     const bytes = Buffer.concat(buffers); const raw = bytes.toString();
     const body = raw && req.headers['content-type']?.includes('application/json') ? JSON.parse(raw) : {};
+    if (url.pathname.startsWith('/open-apis/') || url.pathname.startsWith('/discord/')) {
+      calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), body, headers: req.headers, multipart: raw });
+      if (platformFailure || sendFailure && req.method === 'POST' && !url.pathname.includes('/auth/')) { res.writeHead(platformFailure || 403, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'upstream-private-detail' })); return; }
+      let data;
+      if (url.pathname.endsWith('/tenant_access_token/internal')) data = { code: 0, tenant_access_token: `fs-access-${body.app_id}`, expire: 7200 };
+      else if (url.pathname.endsWith('/bot/v3/info')) data = { code: 0, bot: { open_id: req.headers.authorization.endsWith(FEISHU.appId) ? 'ou_first_bot' : 'ou_second_bot', app_name: 'Test Feishu Bot' } };
+      else if (url.pathname.endsWith('/users/@me')) data = { bot: true, id: req.headers.authorization.endsWith(DISCORD_TOKEN) ? '123456789012345678' : '223456789012345678', username: 'TestDiscordBot' };
+      else if (url.pathname.endsWith('/images')) data = { code: 0, data: { image_key: 'test-image-key' } };
+      else if (url.pathname === '/open-apis/im/v1/messages') { sent.push({ platform: 'feishu', peer: body.receive_id, text: body.msg_type === 'text' ? JSON.parse(body.content).text : '', image: body.msg_type === 'image' }); data = { code: 0, data: { message_id: 'fs-sent' } }; }
+      else if (/\/channels\/[^/]+\/messages$/.test(url.pathname)) { sent.push({ platform: 'discord', peer: url.pathname.split('/')[3], text: body.content, image: !!raw.includes('files[0]') }); data = { id: 'discord-sent' }; }
+      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data || {})); return;
+    }
     if (url.pathname === '/c2c/upload') { calls.push({ path: url.pathname, bytes, headers: req.headers }); res.writeHead(200, { 'x-encrypted-param': 'test-download-param' }); res.end(); return; }
     if (url.pathname.endsWith('sendPhoto')) { calls.push({ path: url.pathname, bytes, headers: req.headers }); sent.push({ platform: 'telegram', image: true, multipart: raw }); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true, result: {} })); return; }
     calls.push({ path: url.pathname, query: Object.fromEntries(url.searchParams), body, headers: req.headers });
@@ -59,7 +83,8 @@ async function fixture({ workers = false, port = 0, publicDir } = {}) {
     validate: async () => ({ text: 'Paseo existing session' }),
     send: async (binding, text) => { paseoCalls.push({ binding, text }); return `Paseo 回复：${text}`; }
   };
-  const app = createApp({ dataDir, publicDir, adapters: createAdapters({ wechatBase: base, telegramBase: base, wechatCdn: `${base}/c2c`, allowTestHosts: true }), native, pi, paseo, workers, pollDelay: 15, errorDelay: 15 });
+  const adapters = createAdapters({ wechatBase: base, telegramBase: base, wechatCdn: `${base}/c2c`, feishuBase: base, discordBase: `${base}/discord`, feishuSocket, discordClient, allowTestHosts: true, ...adapterOptions });
+  const app = createApp({ dataDir, publicDir, adapters, native, pi, paseo, workers, pollDelay: 15, errorDelay: 15 });
   await new Promise(resolve => app.server.listen(port, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${app.server.address().port}`;
   async function request(endpoint, body, method = body === undefined ? 'GET' : 'POST', headers = {}) {
@@ -73,11 +98,12 @@ async function fixture({ workers = false, port = 0, publicDir } = {}) {
     if (result.status !== 200) throw new Error(JSON.stringify(result));
     return result.data.session;
   }
-  return { app, request, session, origin, dataDir, calls, sent, screenshot, screenshotCalls, nativeCalls, piCalls, paseoCalls, paseoId, tgUpdates, wxUpdates, native,
+  return { app, adapters, streams, request, session, origin, dataDir, calls, sent, screenshot, screenshotCalls, nativeCalls, piCalls, paseoCalls, paseoId, tgUpdates, wxUpdates, native,
     setQrStatus: value => { qrStatus = value; }, setQrOwner: value => { qrOwner = value; }, setQrFailure: value => { qrFailure = value; }, setWebhook: value => { webhook = value; }, setNativeFailure: value => { nativeFailure = value; }, setUpdateFailure: value => { updateFailure = value; },
     setSendFailure: value => { sendFailure = value; },
+    setPlatformFailure: value => { platformFailure = value; },
     async close() { await app.close(); await new Promise(resolve => upstream.close(resolve)); fs.rmSync(dataDir, { recursive: true, force: true }); }
   };
 }
 async function until(check, timeout = 3000) { const start = Date.now(); while (!check()) { if (Date.now() - start > timeout) throw new Error('Condition timeout'); await delay(20); } }
-module.exports = { fixture, TOKEN, until };
+module.exports = { fixture, TOKEN, FEISHU, DISCORD_TOKEN, until };

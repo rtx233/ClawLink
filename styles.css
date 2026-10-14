@@ -159,3 +159,7 @@ button:focus-visible, summary:focus-visible { outline: 2px solid var(--orange); 
 .form-input::placeholder { color: var(--muted-2); opacity: 1; }
 input[type="checkbox"] { accent-color: var(--orange); }
 .modal .settings-hint { margin: 9px 0 22px; color: var(--muted); }
+
+.platform-feishu { color: var(--blue-text); background: var(--blue-light); }
+.platform-discord { color: var(--violet-text, var(--blue-text)); background: var(--violet-light, var(--blue-light)); }
+.table-toolbar .segmented { flex-wrap: wrap; }

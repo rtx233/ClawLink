@@ -5,7 +5,7 @@ const readline = require('node:readline');
 const { version } = require('../package.json');
 
 const tools = [
-  { name: 'clawlink_list_recipients', description: '列出用户已开启 AI 发送的微信 / Telegram 收件人，包含名称、recipientId、平台及当前可发送状态。发送前用它确认唯一目标，不猜测 ID。', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
+  { name: 'clawlink_list_recipients', description: '列出用户已开启 AI 发送的微信 / Telegram / 飞书 / Discord 收件人，包含名称、recipientId、平台及当前可发送状态。发送前用它确认唯一目标，不猜测 ID。', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
   { name: 'clawlink_send_message', description: '按用户请求或已有委托，给一个指定收件人发送文字。先列出收件人并选择准确的 recipientId；歧义时询问用户。每次新消息生成一个 UUID requestId；同一消息重试沿用原 ID。submitted 仅表示平台接受，不代表设备已读。失败或超时先检查目标聊天，不要换 ID 自动重发。', inputSchema: { type: 'object', properties: { recipientId: { type: 'string' }, text: { type: 'string', minLength: 1, maxLength: 20000 }, requestId: { type: 'string', minLength: 8, maxLength: 128 } }, required: ['recipientId', 'text', 'requestId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true } }
 ];
 

@@ -1,6 +1,6 @@
 const DEFAULTS = [
   ['help', '/help', '查看可用指令'], ['start', '/start', '开始使用并查看帮助'],
-  ['pair', '/pair', '授权 Telegram 私聊', '配对码'], ['sessions', '/sessions', '列出会话'],
+  ['pair', '/pair', '授权机器人私聊', '配对码'], ['sessions', '/sessions', '列出会话'],
   ['route', '/route', '查看当前路由'], ['switch', '/switch', '切换目标会话', '会话名'],
   ['broadcast', '/broadcast', '下一条消息发送到全部已绑定会话'],
   ['pause', '/pause', '暂停消息路由'], ['resume', '/resume', '恢复消息路由'],
@@ -41,7 +41,7 @@ function createCommands(state) {
     if (state.routes.some(rule => rule.id !== ignoreId && rule.bot === botId && rule.command === command)) throw new CommandError('此机器人已有同名规则');
   }
   function help(bot, allowed) {
-    const rows = list().filter(item => (item.id !== 'pair' || bot.platform === 'telegram') && allowed(item.id));
+    const rows = list().filter(item => (item.id !== 'pair' || bot.platform !== 'wechat') && allowed(item.id));
     return [...rows.map(item => `${item.emoji ? `${item.emoji} ` : ''}${item.trigger}${item.argument ? ` ${item.argument}` : ''} ${item.description}`),
       ...state.routes.filter(rule => rule.bot === bot.id && rule.on && rule.command !== '默认' && allowed(`route:${rule.id}`)).map(rule => `${rule.emoji ? `${rule.emoji} ` : ''}${rule.command} 消息内容 ${rule.description || '发送到指定会话'}`)].join('\n') || '此账户暂无可用指令。';
   }

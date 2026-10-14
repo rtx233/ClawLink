@@ -7,12 +7,16 @@ const { spawn, execFileSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { chromium, expect } = require('@playwright/test');
 const { version } = require('../package.json');
+const { serverFiles } = require('../scripts/package-files.cjs');
 
 test('独立安装包：内置 Node、生产页面、数据隔离、重启恢复偏好、退出停止服务', { skip: process.platform !== 'darwin', timeout: 30000 }, async t => {
   const bundle = path.resolve(`release/ClawLink-${version}-arm64.app`);
   assert.ok(fs.existsSync(bundle), '先执行 npm run release');
   execFileSync('codesign', ['--verify', '--deep', '--strict', bundle]);
   for (const file of ['LICENSE', 'NOTICE']) assert.ok(fs.existsSync(path.join(bundle, 'Contents/Resources', file)));
+  const code = path.join(bundle, 'Contents/Resources/app');
+  assert.deepEqual(fs.readdirSync(path.join(code, 'server')).sort(), [...serverFiles].sort(), '仅打包后端代码白名单，无本地数据');
+  for (const file of ['@larksuiteoapi/node-sdk/LICENSE', 'discord.js/LICENSE']) assert.ok(fs.existsSync(path.join(code, 'node_modules', file)));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawlink-package-'));
   let diagnostic = '';
   let launcher, exited;
@@ -53,6 +57,10 @@ test('独立安装包：内置 Node、生产页面、数据隔离、重启恢复
   await expect(page.locator('#serviceStatus')).toContainText('Local service');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await page.click('#addBotTop');
+  await expect(page.locator('#botPlatform option[value="feishu"]')).toHaveText('Feishu Bot');
+  await expect(page.locator('#botPlatform option[value="discord"]')).toHaveText('Discord Bot');
+  await page.keyboard.press('Escape');
   await expect(page.locator('.view.active')).toHaveCSS('opacity', '1');
   await page.screenshot({ path: '/tmp/clawlink-release-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: '/tmp/clawlink-release-mobile.png', fullPage: true });

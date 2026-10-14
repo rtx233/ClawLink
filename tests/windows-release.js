@@ -6,6 +6,7 @@ const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { _electron: electron, expect } = require('@playwright/test');
 const { version } = require('../package.json');
+const { serverFiles } = require('../scripts/package-files.cjs');
 test('Windows 安装产物：真实窗口、内置 Node、设置桥接、数据隔离与退出停止', { skip: process.platform !== 'win32', timeout: 60000 }, async t => {
   const executablePath = path.resolve('release/win-unpacked/ClawLink.exe');
   assert.ok(fs.existsSync(executablePath), '先执行 npm run release:windows');
@@ -36,10 +37,16 @@ test('Windows 安装产物：真实窗口、内置 Node、设置桥接、数据�
   assert.equal(await page.locator('#launchAtLogin').isEnabled(), true);
   // Read-only startup check: never register login items from tests.
   const code = path.resolve('release/win-unpacked/resources/service');
+  assert.deepEqual(fs.readdirSync(path.join(code, 'server')).sort(), [...serverFiles].sort(), '只打包代码白名单');
+  for (const file of ['@larksuiteoapi/node-sdk/LICENSE', 'discord.js/LICENSE']) assert.ok(fs.existsSync(path.join(code, 'node_modules', file)));
   assert.equal(fs.existsSync(path.join(code, 'server/data')), false);
   assert.equal(fs.existsSync(path.join(code, 'backups')), false);
   assert.equal(fs.existsSync(path.join(code, '.env')), false);
   for (const file of ['LICENSE', 'NOTICE']) assert.ok(fs.existsSync(path.resolve('release/win-unpacked/resources/notices', file)));
+  await page.keyboard.press('Escape');
+  await page.click('#addBotTop');
+  await expect(page.locator('#botPlatform option[value="feishu"]')).toHaveText('Feishu Bot');
+  await expect(page.locator('#botPlatform option[value="discord"]')).toHaveText('Discord Bot');
   await page.keyboard.press('Escape');
   const result = await fetch(`${url}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Windows 持久化测试', provider: 'PI', targetType: 'pi' }) }); assert.equal(result.status, 201);
   await desktop.close(); desktop = null;

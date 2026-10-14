@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const { permissionsFor } = require('./permissions');
+const { platforms, configured } = require('./platforms');
 
 class MessageError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -34,7 +35,7 @@ function createMessaging({ state, secrets, adapters, save, activity }) {
     const secret = secrets[recipient.botId];
     if (!bot || !secret?.allowedPeers?.includes(recipient.peerId)) return '此聊天已撤销授权';
     if (!permissionsFor(bot).sendMessages) return '此账户已关闭接收 AI 主动消息';
-    if (!secret.token || !bot.enabled || bot.status !== 'online') return '机器人尚未在线';
+    if (!configured(bot, secret) || !bot.enabled || bot.status !== 'online') return '机器人尚未在线';
     if (bot.platform === 'wechat' && !secret.peerContexts?.[recipient.peerId]?.contextToken) return '请先从此微信聊天给机器人发送一条消息';
     return '';
   }
@@ -100,7 +101,7 @@ function createMessaging({ state, secrets, adapters, save, activity }) {
         await adapters.send(bot, secret, { peerId: recipient.peerId, contextToken: secret.peerContexts?.[recipient.peerId]?.contextToken }, text);
         record.status = 'submitted';
         record.result = { ok: true, status: 'submitted', requestId, recipientId, recipientName: recipient.name, platform: bot.platform };
-        activity(`${source} → ${bot.platform === 'wechat' ? '微信' : 'Telegram'}「${recipient.name}」：平台已接受消息`, '消息', 'green'); save();
+        activity(`${source} → ${platforms[bot.platform]?.label || bot.platform}「${recipient.name}」：平台已接受消息`, '消息', 'green'); save();
         return record.result;
       } catch {
         record.status = 'failed';

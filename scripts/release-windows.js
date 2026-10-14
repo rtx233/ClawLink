@@ -31,7 +31,7 @@ async function main() {
     writeIcons(icons);
     const notices = path.join(work, 'notices'); fs.mkdirSync(notices);
     for (const file of documents) fs.copyFileSync(path.join(root, file), path.join(notices, file));
-    fs.writeFileSync(path.join(notices, 'THIRD_PARTY_NOTICES.txt'), `ClawLink includes Electron (LICENSE.electron.txt / LICENSES.chromium.html), Node.js ${process.version} (runtime/LICENSE), QRCode and its npm dependencies (service/node_modules licenses).\n`);
+    fs.writeFileSync(path.join(notices, 'THIRD_PARTY_NOTICES.txt'), `ClawLink includes Electron (LICENSE.electron.txt / LICENSES.chromium.html), Node.js ${process.version} (runtime/LICENSE), QRCode, the Feishu Node SDK, Discord.js and their npm dependencies (service/node_modules licenses).\n`);
     const config = {
       appId: 'dev.clawlink.app', productName: 'ClawLink', electronVersion: require('electron/package.json').version,
       extraMetadata: { main: 'windows/main.cjs' }, asar: true, npmRebuild: false,
