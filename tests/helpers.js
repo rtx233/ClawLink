@@ -18,7 +18,7 @@ async function fixture({ workers = false, port = 0, publicDir, adapterOptions = 
     streams.push(stream); return stream;
   };
   const discordClient = options => {
-    const stream = new EventEmitter(); Object.assign(stream, { platform: 'discord', options, closed: false, login(token) { this.token = token; return Promise.resolve(); }, destroy() { this.closed = true; return Promise.resolve(); } });
+    const stream = new EventEmitter(); Object.assign(stream, { platform: 'discord', options, closed: false, ready: false, isReady() { return this.ready; }, login(token) { this.token = token; return Promise.resolve(); }, destroy() { this.closed = true; return Promise.resolve(); } });
     streams.push(stream); return stream;
   };
   const upstream = http.createServer(async (req, res) => {

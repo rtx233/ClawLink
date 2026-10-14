@@ -37,7 +37,10 @@ async function main() {
       extraMetadata: { main: 'windows/main.cjs' }, asar: true, npmRebuild: false,
       directories: { output: release, buildResources: icons },
       files: ['windows/main.cjs', 'windows/preload.cjs', 'package.json'],
-      extraResources: [{ from: code, to: 'service' }, { from: runtime, to: 'runtime' }, { from: icons, to: 'icons' }, { from: notices, to: 'notices' }],
+      // electron-builder excludes a node_modules directory at a matcher's root.
+      // Copy this clean npm-ci tree explicitly so packaged Node cannot fall back
+      // to dependencies in an ancestor development checkout during smoke tests.
+      extraResources: [{ from: code, to: 'service' }, { from: path.join(code, 'node_modules'), to: 'service/node_modules' }, { from: runtime, to: 'runtime' }, { from: icons, to: 'icons' }, { from: notices, to: 'notices' }],
       win: { icon: path.join(icons, 'ClawLink.ico'), target: [{ target: 'nsis', arch: ['x64'] }, { target: 'zip', arch: ['x64'] }], artifactName: `ClawLink-${version}-Windows-\${arch}.\${ext}` },
       nsis: { oneClick: false, perMachine: false, allowToChangeInstallationDirectory: true, deleteAppDataOnUninstall: false, artifactName: `ClawLink-${version}-Windows-\${arch}-setup.\${ext}` }
     };

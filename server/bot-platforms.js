@@ -124,6 +124,9 @@ function createBotPlatforms({ fetchImpl = fetch, feishuBase = 'https://open.feis
             status(fatal ? 'expired' : 'error', code === 4014 || error?.code === 'DisallowedIntents' ? '请在 Discord Developer Portal 开启 Message Content Intent 后重新连接' : 'Discord 连接失败，请检查 Bot Token、Intent 和网络', fatal);
           };
           client.on(Discord.Events.ClientReady, online).on(Discord.Events.MessageCreate, message => deliver(discordEvent(message, secret.botId)))
+            // Re-identifying after a disconnect emits shardReady, but clientReady
+            // only fires once. Require the initial client handshake to be ready.
+            .on(Discord.Events.ShardReady, () => { if (client.isReady()) online(); })
             .on(Discord.Events.ShardReconnecting, () => status('connecting')).on(Discord.Events.ShardResume, online)
             .on(Discord.Events.ShardDisconnect, event => [4004, 4013, 4014].includes(event?.code) ? failure(event) : status('connecting'))
             .on(Discord.Events.ShardError, failure).on(Discord.Events.Error, failure)

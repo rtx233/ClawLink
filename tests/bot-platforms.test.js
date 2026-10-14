@@ -12,7 +12,7 @@ const secondFeishu = { appId: 'cli_abcdef1234567890', appSecret: 'second-private
 const secondDiscord = 'discord-private-test-token-second-account';
 const fsMessage = (text, id = randomUUID(), group = false) => ({ sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } }, message: { message_id: id, chat_id: 'same-peer', chat_type: group ? 'group' : 'p2p', message_type: 'text', content: JSON.stringify({ text }), create_time: String(Date.now()), mentions: [] } });
 const dcMessage = (text, id = randomUUID(), group = false) => ({ id, channelId: 'same-peer', author: { id: '987654321', bot: false }, content: text, guildId: group ? 'guild-id' : null, createdTimestamp: Date.now() });
-const ready = stream => stream.platform === 'feishu' ? stream.options.onReady() : stream.emit('clientReady');
+const ready = stream => { if (stream.platform === 'feishu') stream.options.onReady(); else { stream.ready = true; stream.emit('clientReady'); } };
 async function emit(stream, message) {
   if (stream.platform === 'feishu') await stream.dispatcher.invoke({ schema: '2.0', header: { event_type: 'im.message.receive_v1', event_id: randomUUID() }, event: message }, { needCheck: false });
   else stream.emit('messageCreate', message);
@@ -50,6 +50,7 @@ test('长连接仅在 ready 后在线；私聊配对、指令切换、普通转�
   const feishu = await add(f, 'feishu', FEISHU, a.id); const discord = await add(f, 'discord', { token: DISCORD_TOKEN }, a.id);
   const [fsStream, dcStream] = f.streams;
   assert.equal(feishu.status, 'connecting'); assert.equal(discord.status, 'connecting');
+  dcStream.emit('shardReady'); assert.equal(f.app.viewState().bots[1].status, 'connecting');
   assert.equal(f.app.viewState().service.polling, 2); ready(fsStream); ready(dcStream);
   assert.equal(f.app.viewState().bots[0].status, 'online');
   for (const [bot, stream, factory] of [[feishu, fsStream, fsMessage], [discord, dcStream, dcMessage]]) {
@@ -156,6 +157,7 @@ test('重连 / 停止 / 删除关闭 SDK，过期回调和旧队列不能恢复�
   await f.request(`/api/bots/${bot.id}`, { allowedPeers: ['same-peer'] }, 'PATCH');
   first.emit('shardDisconnect', { code: 1006 }); assert.equal(f.app.viewState().bots[0].status, 'connecting');
   first.emit('shardResume'); assert.equal(f.app.viewState().bots[0].status, 'online');
+  first.emit('shardReconnecting'); first.emit('shardReady'); assert.equal(f.app.viewState().bots[0].status, 'online');
   const send = f.native.send; let finish;
   f.native.send = (...args) => new Promise(resolve => { finish = async () => resolve(await send(...args)); });
   await emit(first, dcMessage('正在执行')); await until(() => !!finish); await emit(first, dcMessage('队列旧消息'));

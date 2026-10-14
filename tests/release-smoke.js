@@ -17,6 +17,10 @@ test('独立安装包：内置 Node、生产页面、数据隔离、重启恢复
   const code = path.join(bundle, 'Contents/Resources/app');
   assert.deepEqual(fs.readdirSync(path.join(code, 'server')).sort(), [...serverFiles].sort(), '仅打包后端代码白名单，无本地数据');
   for (const file of ['@larksuiteoapi/node-sdk/LICENSE', 'discord.js/LICENSE']) assert.ok(fs.existsSync(path.join(code, 'node_modules', file)));
+  for (const dependency of ['qrcode', '@larksuiteoapi/node-sdk', 'discord.js']) {
+    const resolved = execFileSync(path.join(bundle, 'Contents/Resources/runtime/node'), ['-p', `require.resolve(${JSON.stringify(dependency)})`], { cwd: code, encoding: 'utf8' }).trim();
+    assert.ok(resolved.startsWith(path.join(code, 'node_modules') + path.sep));
+  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawlink-package-'));
   let diagnostic = '';
   let launcher, exited;

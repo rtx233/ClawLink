@@ -8,7 +8,7 @@
 
 Windows 与 macOS 共用微信 / Telegram / 飞书 / Discord 接入、路由切换、指令编辑、账户权限和 AI 主动发消息代码。Windows 使用 Electron 独立窗口及系统托盘、UI Automation 会话连接器；自带 Node 和 .NET Framework 连接器，无需另装 Node。当前为未签名的测试版本。
 
-GitHub 仓库的 **Actions → Windows build and validation** 在 `main` 更新时自动构建并验证；成功后从该次运行的 **Artifacts → ClawLink-Windows-x64** 下载。`ClawLink-1.2.0-Windows-x64-setup.exe` 为当前用户安装，ZIP 为解压运行版；普通更新安装包会保留 `%APPDATA%\ClawLink` 中的账号和配置。不要把自己的数据目录放进解压目录或上传到仓库。Mac 和 Windows 各自保存配置，同一机器人应只由一台电脑上的一个 ClawLink 实例接收，避免重复回复。
+GitHub 仓库的 **Actions → Windows build and validation** 在 `main` 更新时自动构建并验证；成功后从该次运行的 **Artifacts → ClawLink-Windows-x64** 下载。`ClawLink-1.2.1-Windows-x64-setup.exe` 为当前用户安装，ZIP 为解压运行版；普通更新安装包会保留 `%APPDATA%\ClawLink` 中的账号和配置。不要把自己的数据目录放进解压目录或上传到仓库。Mac 和 Windows 各自保存配置，同一机器人应只由一台电脑上的一个 ClawLink 实例接收，避免重复回复。
 
 安装后在「设置」开启「登录 Windows 后自动启动」。关闭窗口后继续在托盘接收消息，通过托盘「退出并停止机器人」结束服务。解压版开启自启后应保持 exe 路径不变。启动权限只用于当前用户，不需要管理员权限。截图截取主屏幕，只需开启账户截图权限；没有 macOS 的屏幕录制授权步骤，锁屏 / 无交互桌面时拒绝截图。
 
@@ -18,7 +18,7 @@ PI 支持 Windows npm 安装入口，或者用 `PI_CLI_PATH` 指定 `cli.js` 完
 
 ### macOS Apple Silicon
 
-`release/ClawLink-1.2.0-macOS-arm64.zip` 是 macOS 13.5+、Apple Silicon 的本地测试安装包。解压后将 `.app` 拖到「应用程序」并打开。安装包自带 Node、连接器和界面，无需安装开发工具；控制台直接显示在 ClawLink 的独立 App 窗口中，Dock 和菜单栏均有入口。关闭窗口后继续接收机器人消息；菜单栏或 Cmd+Q 退出时停止服务。
+`release/ClawLink-1.2.1-macOS-arm64.zip` 是 macOS 13.5+、Apple Silicon 的本地测试安装包。解压后将 `.app` 拖到「应用程序」并打开。安装包自带 Node、连接器和界面，无需安装开发工具；控制台直接显示在 ClawLink 的独立 App 窗口中，Dock 和菜单栏均有入口。关闭窗口后继续接收机器人消息；菜单栏或 Cmd+Q 退出时停止服务。
 
 在 App 的「设置」中开启「登录 Mac 后自动启动 ClawLink」。如系统要求批准，点击「打开系统登录项」，允许 ClawLink；界面按系统实际注册状态显示，不会默认开启自启。它在用户登录后运行，电脑仍需保持登录、联网。
 
@@ -201,9 +201,9 @@ Windows CI 使用干净 checkout 构建，两个平台使用相同服务文件�
 如具备 Developer ID，构建时设置 `CLAWLINK_SIGN_IDENTITY` 为证书名称。随后使用自己的 Apple 公证配置提交 ZIP：
 
 ```bash
-xcrun notarytool submit release/ClawLink-1.2.0-macOS-arm64.zip --keychain-profile YOUR_PROFILE --wait
-xcrun stapler staple release/ClawLink-1.2.0-arm64.app
-spctl --assess --type execute --verbose release/ClawLink-1.2.0-arm64.app
+xcrun notarytool submit release/ClawLink-1.2.1-macOS-arm64.zip --keychain-profile YOUR_PROFILE --wait
+xcrun stapler staple release/ClawLink-1.2.1-arm64.app
+spctl --assess --type execute --verbose release/ClawLink-1.2.1-arm64.app
 ```
 
 公证成功、staple 与系统评估均通过后，再重新压缩已 staple 的 `.app` 并生成新校验和。构建产生的 manifest 默认记录 `notarized: false`；只有实际公证通过后才应更新发行记录。

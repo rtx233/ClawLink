@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 const { _electron: electron, expect } = require('@playwright/test');
 const { version } = require('../package.json');
@@ -39,6 +40,10 @@ test('Windows 安装产物：真实窗口、内置 Node、设置桥接、数据�
   const code = path.resolve('release/win-unpacked/resources/service');
   assert.deepEqual(fs.readdirSync(path.join(code, 'server')).sort(), [...serverFiles].sort(), '只打包代码白名单');
   for (const file of ['@larksuiteoapi/node-sdk/LICENSE', 'discord.js/LICENSE']) assert.ok(fs.existsSync(path.join(code, 'node_modules', file)));
+  for (const dependency of ['qrcode', '@larksuiteoapi/node-sdk', 'discord.js']) {
+    const resolved = execFileSync(path.resolve('release/win-unpacked/resources/runtime/node.exe'), ['-p', `require.resolve(${JSON.stringify(dependency)})`], { cwd: code, encoding: 'utf8' }).trim();
+    assert.ok(resolved.startsWith(path.join(code, 'node_modules') + path.sep), '后端依赖必须来自安装包，不能沿用开发目录');
+  }
   assert.equal(fs.existsSync(path.join(code, 'server/data')), false);
   assert.equal(fs.existsSync(path.join(code, 'backups')), false);
   assert.equal(fs.existsSync(path.join(code, '.env')), false);
